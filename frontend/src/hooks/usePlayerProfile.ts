@@ -2,9 +2,6 @@ import { useCallback, useState } from "react";
 import { usePlayerStore, PlayerProfile } from "../store/playerStore";
 import { buildPlayerProfile } from "../api/client";
 
-/**
- * Hook for fetching and managing player profiles.
- */
 export function usePlayerProfile() {
   const { opponent, opponentLoading, setOpponent, setOpponentLoading } =
     usePlayerStore();
@@ -32,7 +29,25 @@ export function usePlayerProfile() {
           setError(response.error || "Failed to fetch profile");
         }
       } catch (err: any) {
-        setError(err.response?.data?.error || err.message);
+        // Graceful error messages for common failure modes
+        const status = err.response?.status;
+        const code = err.code;
+
+        if (code === "ECONNREFUSED" || code === "ERR_NETWORK") {
+          setError(
+            "Could not reach the analysis service. Make sure the ML backend is running."
+          );
+        } else if (status === 500) {
+          setError(
+            "The analysis service encountered an error. The ML backend may not be running or the player was not found."
+          );
+        } else if (status === 404) {
+          setError(`Player "${username}" not found on ${source}.`);
+        } else if (status === 429) {
+          setError("Too many requests. Please wait a moment and try again.");
+        } else {
+          setError(err.response?.data?.error || err.message);
+        }
         setOpponent(null);
       } finally {
         setOpponentLoading(false);

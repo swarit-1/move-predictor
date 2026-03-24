@@ -22,27 +22,29 @@ export interface PredictionData {
 }
 
 interface GameState {
-  // Chess game state
   chess: Chess;
   fen: string;
   moveHistory: string[];
   pgn: string;
 
-  // Prediction state
   prediction: PredictionData | null;
   isLoading: boolean;
+  predictionError: string | null;
 
-  // Mode
+  // Player color choice
+  playerColor: "w" | "b";
+
   mode: "analyze" | "simulate";
   simulationSessionId: string | null;
 
-  // Actions
   setFen: (fen: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
   undoMove: () => void;
   resetGame: () => void;
   setPrediction: (pred: PredictionData | null) => void;
   setLoading: (loading: boolean) => void;
+  setPredictionError: (error: string | null) => void;
+  setPlayerColor: (color: "w" | "b") => void;
   setMode: (mode: "analyze" | "simulate") => void;
   setSimulationSession: (id: string | null) => void;
   loadPgn: (pgn: string) => void;
@@ -56,6 +58,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   pgn: "",
   prediction: null,
   isLoading: false,
+  predictionError: null,
+  playerColor: "w",
   mode: "analyze",
   simulationSessionId: null,
 
@@ -103,12 +107,15 @@ export const useGameStore = create<GameState>((set, get) => ({
       moveHistory: [],
       pgn: "",
       prediction: null,
+      predictionError: null,
       simulationSessionId: null,
     });
   },
 
   setPrediction: (pred) => set({ prediction: pred }),
   setLoading: (loading) => set({ isLoading: loading }),
+  setPredictionError: (error) => set({ predictionError: error }),
+  setPlayerColor: (color) => set({ playerColor: color }),
   setMode: (mode) => set({ mode }),
   setSimulationSession: (id) => set({ simulationSessionId: id }),
 

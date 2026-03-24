@@ -89,6 +89,10 @@ class MovePredictor(nn.Module):
 
         # Mask illegal moves for probability computation
         if legal_move_mask is not None:
+            # Pad mask if it's smaller than policy logits (encoding table vs config mismatch)
+            if legal_move_mask.shape[-1] < policy_logits.shape[-1]:
+                pad_size = policy_logits.shape[-1] - legal_move_mask.shape[-1]
+                legal_move_mask = torch.nn.functional.pad(legal_move_mask, (0, pad_size), value=False)
             masked_logits = policy_logits.clone()
             masked_logits[~legal_move_mask] = float("-inf")
             policy_probs = torch.softmax(masked_logits, dim=-1)

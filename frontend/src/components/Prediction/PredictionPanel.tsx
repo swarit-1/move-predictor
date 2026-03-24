@@ -1,20 +1,16 @@
 import { useGameStore } from "../../store/gameStore";
 import { MoveDistribution } from "./MoveDistribution";
 
-/**
- * Panel showing the model's move prediction with probabilities
- * and comparison to engine analysis.
- */
 export function PredictionPanel() {
   const prediction = useGameStore((s) => s.prediction);
   const isLoading = useGameStore((s) => s.isLoading);
 
   if (isLoading) {
     return (
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-2">Prediction</h3>
-        <div className="flex items-center gap-2 text-sm text-gray-400">
-          <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p className="text-xs font-medium text-gray-500 mb-3">Prediction</p>
+        <div className="flex items-center gap-2.5 text-sm text-gray-400">
+          <span className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-500 rounded-full animate-spin" />
           Analyzing position...
         </div>
       </div>
@@ -23,72 +19,71 @@ export function PredictionPanel() {
 
   if (!prediction) {
     return (
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-2">Prediction</h3>
-        <p className="text-xs text-gray-500">
-          Click "Predict Move" to see what the model thinks a human would play.
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p className="text-xs font-medium text-gray-500 mb-2">Prediction</p>
+        <p className="text-xs text-gray-600">
+          Make a move as White to see the model's prediction for Black.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 space-y-3">
-      <h3 className="text-sm font-semibold text-gray-300">Prediction</h3>
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
+      <p className="text-xs font-medium text-gray-500">Prediction</p>
 
       {/* Main prediction */}
       <div className="flex items-center gap-3">
-        <div className="px-3 py-2 bg-green-600/20 border border-green-600/40 rounded-lg">
-          <span className="text-lg font-bold text-green-400 font-mono">
+        <div className="px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+          <span className="text-base font-bold text-green-400 font-mono">
             {prediction.move}
           </span>
         </div>
-        <div className="text-xs text-gray-400 space-y-0.5">
-          <p>
-            Confidence:{" "}
-            <span className="text-green-400 font-medium">
+        <div className="text-xs space-y-1">
+          <p className="text-gray-400">
+            Confidence{" "}
+            <span className="text-green-400 font-medium font-mono">
               {(prediction.probability * 100).toFixed(1)}%
             </span>
           </p>
-          <p>
-            Temperature:{" "}
-            <span className="text-gray-300">{prediction.temperature.toFixed(2)}</span>
+          <p className="text-gray-500">
+            Temp{" "}
+            <span className="text-gray-400 font-mono">
+              {prediction.temperature.toFixed(2)}
+            </span>
           </p>
         </div>
       </div>
 
       {/* Engine comparison */}
       {prediction.engineBest && (
-        <div className="text-xs space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400">Engine best:</span>
-            <span className="font-mono text-blue-400">{prediction.engineBest}</span>
-            {prediction.move !== prediction.engineBest && (
-              <span className="px-1.5 py-0.5 bg-yellow-600/20 text-yellow-400 rounded text-[10px]">
-                Deviation
-              </span>
-            )}
-            {prediction.move === prediction.engineBest && (
-              <span className="px-1.5 py-0.5 bg-green-600/20 text-green-400 rounded text-[10px]">
-                Agrees
-              </span>
-            )}
-          </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-gray-500">Engine best</span>
+          <span className="font-mono text-blue-400">{prediction.engineBest}</span>
+          {prediction.move === prediction.engineBest ? (
+            <span className="px-1.5 py-0.5 bg-green-500/10 text-green-400/80 rounded text-[10px]">
+              Match
+            </span>
+          ) : (
+            <span className="px-1.5 py-0.5 bg-yellow-500/10 text-yellow-400/80 rounded text-[10px]">
+              Deviation
+            </span>
+          )}
         </div>
       )}
 
-      {/* Error prediction */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="bg-gray-700/50 rounded p-2">
-          <p className="text-gray-400">Predicted CPL</p>
-          <p className="text-lg font-bold text-gray-200">
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-gray-800/50 rounded-lg p-2.5">
+          <p className="text-[10px] text-gray-500 mb-0.5">Predicted CPL</p>
+          <p className="text-sm font-semibold font-mono text-gray-200">
             {prediction.predictedCpl.toFixed(0)}
           </p>
         </div>
-        <div className="bg-gray-700/50 rounded p-2">
-          <p className="text-gray-400">Blunder Prob</p>
+        <div className="bg-gray-800/50 rounded-lg p-2.5">
+          <p className="text-[10px] text-gray-500 mb-0.5">Blunder Prob</p>
           <p
-            className={`text-lg font-bold ${
+            className={`text-sm font-semibold font-mono ${
               prediction.blunderProbability > 0.3
                 ? "text-red-400"
                 : prediction.blunderProbability > 0.1
@@ -101,7 +96,6 @@ export function PredictionPanel() {
         </div>
       </div>
 
-      {/* Move distribution chart */}
       <MoveDistribution
         topMoves={prediction.topMoves}
         engineTopMoves={prediction.engineTopMoves}

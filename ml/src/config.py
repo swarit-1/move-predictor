@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     d_model: int = 256
     player_embed_dim: int = 128
     fusion_dim: int = 512
-    move_vocab_size: int = 1968
+    move_vocab_size: int = 1858
     history_length: int = 12
     max_players: int = 200_000
     num_player_stats: int = 25

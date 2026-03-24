@@ -21,61 +21,61 @@ interface Props {
   }>;
 }
 
-/**
- * Horizontal bar chart showing the probability distribution of top predicted moves.
- */
 export function MoveDistribution({ topMoves, engineTopMoves }: Props) {
   if (!topMoves || topMoves.length === 0) return null;
 
   const data = topMoves.slice(0, 5).map((m) => {
-    // Find engine rank for this move
     const engineEntry = engineTopMoves?.find((e) => e.move === m.move_uci);
-
     return {
       move: m.move_uci,
       probability: +(m.probability * 100).toFixed(1),
       engineRank: m.engine_rank || engineEntry?.rank || null,
-      engineCp: engineEntry?.cp,
     };
   });
 
   return (
     <div>
-      <p className="text-xs text-gray-400 mb-1">Move Distribution</p>
-      <ResponsiveContainer width="100%" height={120}>
-        <BarChart data={data} layout="vertical" margin={{ left: 40, right: 10 }}>
+      <p className="text-[10px] text-gray-500 mb-1">Move Distribution</p>
+      <ResponsiveContainer width="100%" height={110}>
+        <BarChart data={data} layout="vertical" margin={{ left: 35, right: 8 }}>
           <XAxis
             type="number"
             domain={[0, "dataMax"]}
             tickFormatter={(v) => `${v}%`}
-            tick={{ fontSize: 10, fill: "#9ca3af" }}
+            tick={{ fontSize: 9, fill: "#6b7280" }}
+            axisLine={false}
+            tickLine={false}
           />
           <YAxis
             type="category"
             dataKey="move"
-            tick={{ fontSize: 11, fill: "#d1d5db", fontFamily: "monospace" }}
-            width={40}
+            tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "monospace" }}
+            width={35}
+            axisLine={false}
+            tickLine={false}
           />
           <Tooltip
-            formatter={(value: number, name: string) => [`${value}%`, "Probability"]}
+            formatter={(value: number) => [`${value}%`, "Probability"]}
             contentStyle={{
-              backgroundColor: "#1f2937",
-              border: "1px solid #374151",
-              borderRadius: "6px",
-              fontSize: "12px",
+              backgroundColor: "#111827",
+              border: "1px solid #1f2937",
+              borderRadius: "8px",
+              fontSize: "11px",
+              color: "#d1d5db",
             }}
           />
-          <Bar dataKey="probability" radius={[0, 4, 4, 0]}>
+          <Bar dataKey="probability" radius={[0, 3, 3, 0]}>
             {data.map((entry, index) => (
               <Cell
                 key={`cell-${index}`}
                 fill={
                   index === 0
-                    ? "#22c55e" // top prediction: green
+                    ? "#22c55e"
                     : entry.engineRank === 1
-                    ? "#3b82f6" // engine best: blue
-                    : "#6b7280" // other: gray
+                    ? "#3b82f6"
+                    : "#374151"
                 }
+                fillOpacity={index === 0 ? 0.7 : 0.5}
               />
             ))}
           </Bar>

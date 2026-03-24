@@ -1,8 +1,5 @@
 import { usePlayerStore, StyleOverrides } from "../../store/playerStore";
 
-/**
- * User-adjustable sliders for controlling the simulated player's style.
- */
 export function StyleSliders() {
   const { styleOverrides, setStyleOverride, resetStyleOverrides } =
     usePlayerStore();
@@ -30,12 +27,12 @@ export function StyleSliders() {
   ];
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 space-y-3">
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-300">Style Controls</h3>
+        <p className="text-xs font-medium text-gray-500">Style Controls</p>
         <button
           onClick={resetStyleOverrides}
-          className="text-xs text-gray-500 hover:text-gray-300"
+          className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
         >
           Reset
         </button>
@@ -43,9 +40,9 @@ export function StyleSliders() {
 
       {sliders.map(({ key, label, description }) => (
         <div key={key}>
-          <div className="flex justify-between text-xs mb-1">
+          <div className="flex justify-between text-xs mb-1.5">
             <span className="text-gray-400">{label}</span>
-            <span className="text-gray-300 font-mono">
+            <span className="text-gray-300 font-mono text-[11px]">
               {styleOverrides[key].toFixed(0)}
             </span>
           </div>
@@ -55,12 +52,9 @@ export function StyleSliders() {
             max={100}
             value={styleOverrides[key]}
             onChange={(e) => setStyleOverride(key, Number(e.target.value))}
-            className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer
-                       [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
-                       [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
-                       [&::-webkit-slider-thumb]:bg-blue-500"
+            className="w-full"
           />
-          <p className="text-[10px] text-gray-500 mt-0.5">{description}</p>
+          <p className="text-[10px] text-gray-600 mt-1">{description}</p>
         </div>
       ))}
     </div>
