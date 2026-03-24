@@ -16,6 +16,7 @@ The system fetches real player games from Lichess and Chess.com, builds per-play
   - [Model Components](#model-components)
   - [Multi-Task Learning](#multi-task-learning)
   - [Skill-Aware Sampling](#skill-aware-sampling)
+  - [Stockfish Fallback](#stockfish-fallback-no-checkpoint-mode)
 - [Data Pipeline](#data-pipeline)
   - [Ingestion](#ingestion)
   - [Preprocessing](#preprocessing)
@@ -24,8 +25,8 @@ The system fetches real player games from Lichess and Chess.com, builds per-play
 - [Training Strategy](#training-strategy)
 - [Quick Start](#quick-start)
   - [Prerequisites](#prerequisites)
-  - [Docker (Recommended)](#docker-recommended)
-  - [Local Development](#local-development)
+  - [Local Development (Recommended)](#local-development-recommended)
+  - [Docker](#docker)
   - [Running Individual Services](#running-individual-services)
 - [End-to-End Workflow](#end-to-end-workflow)
 - [API Reference](#api-reference)
@@ -130,7 +131,7 @@ The attack maps in channels 12–13 give the model immediate spatial information
 
 ### Move Encoding
 
-Moves are encoded into a **fixed vocabulary of ~1,968 indices**, following the scheme used by Leela Chess Zero and Maia:
+Moves are encoded into a **fixed vocabulary of 1,858 indices**, following the scheme used by Leela Chess Zero and Maia:
 
 - **56 queen-like moves**: 7 distances x 8 compass directions (N, NE, E, SE, S, SW, W, NW)
 - **8 knight moves**: the 8 possible L-shaped offsets
@@ -160,7 +161,7 @@ Player ID + Stats         ──→  Player Embed   ──→  (B, 128)  ──�
                                               ┌─────────────────────────┼─────────────────────┐
                                               ▼                         ▼                     ▼
                                        Policy Head              Value Head             Error Head
-                                       (B, 1968)                (B, 1)                (B, 2)
+                                       (B, 1858)                (B, 1)                (B, 2)
                                      Move probs [-1,1]         Position eval    CPL pred + blunder prob
 ```
 
@@ -174,7 +175,7 @@ A 15-block residual convolutional network with 256 channels per block. Each bloc
 
 #### Sequence Encoder — Transformer (~2.1M parameters)
 
-A 4-layer Transformer encoder over the last 12 half-moves (configurable via `history_length`). Each move in the history is embedded via a learned embedding table over the 1,968-move vocabulary, combined with learned positional embeddings and an optional game phase embedding (opening=0, middlegame=1, endgame=2).
+A 4-layer Transformer encoder over the last 12 half-moves (configurable via `history_length`). Each move in the history is embedded via a learned embedding table over the 1,858-move vocabulary, combined with learned positional embeddings and an optional game phase embedding (opening=0, middlegame=1, endgame=2).
 
 The encoder uses pre-layer normalization (`norm_first=True`) for training stability, 8 attention heads, and a feedforward dimension of 512. The output is mean-pooled over non-padded positions and layer-normalized.
 
@@ -221,7 +222,7 @@ The model is trained with three simultaneous objectives:
 
 | Head | Task | Loss | Weight |
 |------|------|------|--------|
-| **Policy** | Predict which move was played | Cross-entropy over 1,968-move vocabulary | 1.0 (Phase 1), 2.0 (Phase 2+) |
+| **Policy** | Predict which move was played | Cross-entropy over 1,858-move vocabulary | 1.0 (Phase 1), 2.0 (Phase 2+) |
 | **Value** | Predict position evaluation | MSE against Stockfish eval (normalized to [-1, 1]) | 0.5 |
 | **Error** | Predict centipawn loss + blunder probability | MSE(CPL) + Binary Cross-Entropy(blunder) | 0.5 each |
 
@@ -267,6 +268,20 @@ This produces realistic human play: a 2400-rated model plays almost engine-like 
 
 **Implementation:** [ml/src/inference/sampler.py](ml/src/inference/sampler.py)
 
+### Stockfish Fallback (No Checkpoint Mode)
+
+When no trained model checkpoint is available, the system does **not** play random moves. Instead, it builds a realistic policy distribution from Stockfish analysis:
+
+1. **Engine-based logits**: Stockfish's top moves receive high logits (5.0 for the best move, decaying by rank and centipawn difference). All other legal moves get a small base logit (-1.0 + noise) so they aren't completely impossible.
+2. **Rating-calibrated error**: CPL and blunder probability are estimated from the target rating:
+   - CPL: `max(0.0, 3.0 - rating × 0.0012)` (~1.8 at 1000, ~0.6 at 2000)
+   - Blunder: `max(0.02, 0.35 - rating × 0.00012)` (~23% at 1000, ~11% at 2000)
+3. **Same skill-aware sampler**: These synthetic logits are fed through the same temperature-based sampling pipeline, so all rating and style controls work identically to the trained model path.
+
+This means the system produces reasonable, skill-appropriate play from the first launch — a 2500-rated opponent plays near-engine moves while a 1000-rated opponent makes realistic mistakes.
+
+**Implementation:** [ml/src/inference/pipeline.py](ml/src/inference/pipeline.py)
+
 ---
 
 ## Data Pipeline
@@ -292,7 +307,7 @@ For each game, every position is processed into a training example:
 1. Parse PGN into a `python-chess` Game object.
 2. Iterate through each move. At each position:
    - Generate the 18-channel board tensor.
-   - Encode the played move as a 1,968-vocabulary index.
+   - Encode the played move as a 1,858-vocabulary index.
    - Record the last 12 half-moves as a sequence of indices (padded with 0 for early game).
    - Classify the game phase (opening/middlegame/endgame) based on material count and move number.
 3. Optionally annotate with Stockfish (see below).
@@ -381,13 +396,13 @@ Training proceeds in three phases, each building on the previous checkpoint:
 
 ```bash
 # Phase 1
-python ml/scripts/train.py --phase 1 --data data/processed/train.h5 --epochs 20 --lr 0.001
+python3 ml/scripts/train.py --phase 1 --data data/processed/train.h5 --epochs 20 --lr 0.001
 
 # Phase 2 (from Phase 1 checkpoint)
-python ml/scripts/train.py --phase 2 --data data/processed/train.h5 --checkpoint data/checkpoints/phase1_best.pt --epochs 10 --lr 0.0001
+python3 ml/scripts/train.py --phase 2 --data data/processed/train.h5 --checkpoint data/checkpoints/phase1_best.pt --epochs 10 --lr 0.0001
 
 # Phase 3 (for a specific player)
-python ml/scripts/train.py --phase 3 --data data/processed/player_games.h5 --checkpoint data/checkpoints/phase2_best.pt --epochs 3
+python3 ml/scripts/train.py --phase 3 --data data/processed/player_games.h5 --checkpoint data/checkpoints/phase2_best.pt --epochs 3
 ```
 
 All training runs support TensorBoard logging (`runs/` directory), automatic checkpointing (latest + best), and gradient clipping (max norm 1.0).
@@ -402,66 +417,59 @@ All training runs support TensorBoard logging (`runs/` directory), automatic che
 
 - **Python 3.11+** (with pip)
 - **Node.js 20+** (with npm)
-- **Docker & Docker Compose** (for PostgreSQL and Redis, or full-stack deployment)
-- **Stockfish 17** binary (downloaded via the included script)
+- **Docker & Docker Compose** (optional — for full-stack deployment or running PostgreSQL/Redis)
+- **Stockfish 17** binary (auto-downloaded by the startup script if not found)
 
-### Docker (Recommended)
+### Local Development (Recommended)
 
-The fastest way to get everything running:
+The easiest way to get everything running locally:
 
 ```bash
 # Clone and enter the repo
 git clone <repo-url> && cd move-predictor
 
-# Start all services
-docker compose up --build
+# Run the automated startup script
+./start-dev.sh
 ```
 
-This starts PostgreSQL, Redis, the ML service (:8000), the backend (:3000), and the frontend (:5173).
+The startup script automatically:
+1. Checks for Python 3.11+ and Node.js 20+
+2. Installs ML, backend, and frontend dependencies if missing
+3. Downloads Stockfish if not already present
+4. Writes the ML service `.env` file with the correct Stockfish path
+5. Starts all three services with health-check polling
+6. Provides a clean `Ctrl+C` shutdown for all processes
 
-### Local Development
-
-```bash
-# Install all dependencies
-make setup
-
-# Start PostgreSQL and Redis in Docker
-docker compose up postgres redis -d
-
-# Download Stockfish binary
-make download-stockfish
-# Then set STOCKFISH_PATH in your .env (see .env.example)
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your Stockfish path
-
-# Start all three services concurrently
-make dev
-```
-
-This runs:
+Services:
 - ML service on `http://localhost:8000` (uvicorn with hot reload)
 - Backend on `http://localhost:3000` (tsx with hot reload)
 - Frontend on `http://localhost:5173` (Vite dev server)
+
+Logs are written to `.dev-logs/` (ml.log, backend.log, frontend.log).
+
+You can also use `make dev` which calls `start-dev.sh` under the hood.
+
+### Docker
+
+For containerized deployment:
+
+```bash
+docker compose up --build
+```
+
+This starts PostgreSQL, Redis, the ML service (:8000), the backend (:3000), and the frontend (:5173). Note: Docker is **not required** for local development — `start-dev.sh` handles everything with a local SQLite database.
 
 ### Running Individual Services
 
 ```bash
 # ML Service only
-cd ml
-pip install -e ".[dev]"
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+make dev-ml
 
 # Backend only
-cd backend
-npm install
-npm run dev
+make dev-backend
 
 # Frontend only
-cd frontend
-npm install
-npm run dev
+make dev-frontend
 ```
 
 ---
@@ -475,22 +483,24 @@ A typical workflow from zero to playing against a simulated opponent:
 make download-stockfish
 
 # 2. Fetch games for a specific player
-cd ml && python scripts/fetch_lichess_data.py DrNykterstein --max-games 1000
+cd ml && python3 scripts/fetch_lichess_data.py DrNykterstein --max-games 1000
 
 # 3. Preprocess games into HDF5 training data
-python scripts/preprocess_corpus.py data/raw/ --output data/processed/train.h5 --val-split 0.05
+python3 scripts/preprocess_corpus.py data/raw/ --output data/processed/train.h5 --val-split 0.05
 
 # 4. Train Phase 1 (general human move prediction)
-python scripts/train.py --phase 1 --data data/processed/train.h5 --val-data data/processed/val.h5 --epochs 20
+python3 scripts/train.py --phase 1 --data data/processed/train.h5 --val-data data/processed/val.h5 --epochs 20
 
 # 5. Start the services
-cd .. && make dev
+cd .. && ./start-dev.sh
 
 # 6. Open the frontend at http://localhost:5173
-#    - Search for a player → builds their profile
-#    - Click "Predict Move" to see predictions
-#    - Adjust style sliders to modify behavior
-#    - Switch to Simulate mode to play against the AI
+#    - The Setup Screen lets you configure your game:
+#      - Choose to play as White or Black
+#      - Select an opponent by Player Profile, Rating, or Custom Style
+#    - Click "Start Game" to enter the game
+#    - Make your move — the opponent responds automatically
+#    - Adjust style sliders to modify opponent behavior
 ```
 
 Alternatively, use the API directly:
@@ -639,19 +649,24 @@ curl http://localhost:3000/api/simulate/<session_id>
 
 ## Frontend Features
 
-The React frontend provides:
+The React frontend uses a **two-phase game flow**:
 
-- **Interactive Chessboard** — Drag-and-drop piece movement using `react-chessboard`, with SVG arrow overlays showing engine best move (blue) and model prediction (green).
-- **Prediction Panel** — Shows the model's top predicted move with confidence percentage, sampling temperature, predicted centipawn loss, and blunder probability gauge.
-- **Move Distribution Chart** — Horizontal bar chart (Recharts) showing the probability distribution of the top 5 predicted moves, color-coded by engine agreement.
-- **Evaluation Bar** — Vertical bar showing the Stockfish position evaluation, with a sigmoid-mapped percentage fill.
-- **Explainability Panel** — Human-readable explanations for why the model chose a specific move, especially when deviating from the engine's recommendation.
-- **Player Search** — Search for Lichess or Chess.com users, fetch their games, and build style profiles.
-- **Player Profile Display** — Radar-bar visualization of aggression, tactical tendency, accuracy, consistency, and opening diversity.
-- **Style Sliders** — Three adjustable controls (0–100): Aggression (biases toward captures/checks), Risk Taking (scales sampling temperature), Blunder Frequency (raises error rate).
-- **Simulation Mode** — Play against a simulated opponent with real-time AI responses.
-- **Move List** — Scrollable, clickable list of game moves for navigation.
-- **Game Import** — Fetch games by username from Lichess/Chess.com or upload PGN files.
+### Setup Screen
+- **Color Selection** — Choose to play as White or Black before the game starts.
+- **Opponent Configuration** — Three tabs for selecting your opponent:
+  - **Player Profile** — Search for a real Lichess/Chess.com player and play against their modeled style.
+  - **By Rating** — Select a target ELO (600–2800) to play against a generic opponent of that skill level.
+  - **Custom Style** — Fine-tune aggression, risk-taking, and blunder frequency sliders to craft a specific play style.
+
+### Game Screen
+- **Interactive Chessboard** — Fixed 560px drag-and-drop board using `react-chessboard`, oriented based on your chosen color. SVG arrow overlays show engine best move (blue) and model prediction (green).
+- **Auto-Predict** — After you make a move, the opponent automatically responds — no manual "Predict Move" button needed.
+- **Evaluation Bar** — Vertical bar showing the Stockfish position evaluation.
+- **Analysis Panel** — Shows prediction confidence, sampling temperature, centipawn loss, blunder probability, move distribution chart (Recharts), and human-readable explanations for move choices.
+- **Error Handling** — Graceful error banners when the ML service is unreachable, with a retry button. Predictions stop retrying on connection failure to avoid spam.
+- **Game Controls** — Undo, reset, and game-over detection.
+- **Move List** — Scrollable, clickable list of game moves.
+- **Opponent Badge** — Compact display of the current opponent's profile in the game header.
 
 ---
 
@@ -688,7 +703,7 @@ Model architecture hyperparameters (also configurable via environment):
 | `D_MODEL` | `256` | Transformer model dimension |
 | `PLAYER_EMBED_DIM` | `128` | Player embedding dimension |
 | `FUSION_DIM` | `512` | Fusion layer output dimension |
-| `MOVE_VOCAB_SIZE` | `1968` | Move vocabulary size |
+| `MOVE_VOCAB_SIZE` | `1858` | Move vocabulary size |
 | `HISTORY_LENGTH` | `12` | Number of past moves to encode |
 | `MAX_PLAYERS` | `200000` | Maximum player embedding slots |
 | `NUM_PLAYER_STATS` | `25` | Continuous player features |
@@ -701,12 +716,15 @@ Model architecture hyperparameters (also configurable via environment):
 move-predictor/
 ├── docker-compose.yml              # Full-stack container orchestration
 ├── Makefile                         # Development shortcuts
+├── start-dev.sh                     # Automated local dev startup script
 ├── .env.example                     # Environment variable template
 ├── .gitignore
 ├── README.md
 │
 ├── ml/                              # Python ML service
 │   ├── Dockerfile
+│   ├── .dockerignore
+│   ├── .env                         # Auto-generated by start-dev.sh
 │   ├── pyproject.toml               # Dependencies + project config
 │   ├── src/
 │   │   ├── main.py                  # FastAPI app entrypoint
@@ -724,7 +742,7 @@ move-predictor/
 │   │   │   ├── player_embedding.py  # Per-player learned embedding
 │   │   │   ├── fusion.py            # Skill-aware gated fusion
 │   │   │   ├── heads.py             # Policy + Value + Error heads
-│   │   │   └── move_encoding.py     # 1968-index move vocabulary
+│   │   │   └── move_encoding.py     # 1858-index move vocabulary
 │   │   ├── engine/                  # Stockfish integration
 │   │   │   ├── stockfish_pool.py    # Process pool (4 instances)
 │   │   │   └── analysis.py          # CPL computation + game annotation
@@ -762,6 +780,7 @@ move-predictor/
 │
 ├── backend/                         # Node.js API gateway
 │   ├── Dockerfile
+│   ├── .dockerignore
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── src/
@@ -783,34 +802,40 @@ move-predictor/
 │
 ├── frontend/                        # React SPA
 │   ├── Dockerfile
+│   ├── .dockerignore
+│   ├── nginx.conf                   # Nginx config for Docker container
 │   ├── package.json
 │   ├── vite.config.ts               # Vite + API proxy
 │   ├── tailwind.config.js
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx                 # React + QueryClient entry
-│       ├── App.tsx                  # Root layout + tab routing
+│       ├── App.tsx                  # Two-phase flow (setup → game)
 │       ├── api/
 │       │   └── client.ts           # Axios API wrapper
 │       ├── store/
-│       │   ├── gameStore.ts         # Chess state (Zustand)
+│       │   ├── gameStore.ts         # Chess state + player color (Zustand)
 │       │   └── playerStore.ts       # Player + style state
 │       ├── hooks/
 │       │   ├── useChessGame.ts      # Board interaction hook
-│       │   ├── usePrediction.ts     # Prediction fetching hook
+│       │   ├── usePrediction.ts     # Auto-prediction with error handling
 │       │   └── usePlayerProfile.ts  # Player profile hook
 │       ├── components/
+│       │   ├── Setup/
+│       │   │   └── SetupScreen.tsx  # Pre-game config (color, opponent)
 │       │   ├── Board/
-│       │   │   ├── ChessBoard.tsx   # react-chessboard + arrows
+│       │   │   ├── ChessBoard.tsx   # Fixed 560px board + orientation
 │       │   │   └── EvalBar.tsx      # Vertical eval indicator
 │       │   ├── Game/
-│       │   │   ├── GameControls.tsx  # Undo, reset, predict buttons
+│       │   │   ├── GameScreen.tsx    # Main game layout + auto-predict
+│       │   │   ├── GameControls.tsx  # Undo, reset controls
 │       │   │   ├── GameImport.tsx    # Username fetch + PGN upload
 │       │   │   └── MoveList.tsx      # Scrollable move pairs
 │       │   ├── Player/
 │       │   │   ├── PlayerSearch.tsx   # Username search input
 │       │   │   ├── PlayerProfile.tsx  # Style bar visualization
-│       │   │   └── StyleSliders.tsx   # Aggression/risk/blunder
+│       │   │   ├── StyleSliders.tsx   # Aggression/risk/blunder
+│       │   │   └── OpponentBadge.tsx  # Compact opponent display
 │       │   ├── Prediction/
 │       │   │   ├── PredictionPanel.tsx  # Main prediction display
 │       │   │   ├── MoveDistribution.tsx # Bar chart (Recharts)
@@ -822,7 +847,7 @@ move-predictor/
 │       │       ├── Loading.tsx
 │       │       └── ErrorBoundary.tsx
 │       └── styles/
-│           └── global.css           # Tailwind imports + custom
+│           └── global.css           # Tailwind imports + custom styles
 │
 └── data/                            # Runtime data (gitignored)
     ├── raw/                         # Downloaded PGN files
@@ -904,7 +929,7 @@ Behavioral tests also verify that:
 
 **ResNet over Vision Transformer for the board encoder.** The 8x8 grid is far below the resolution where ViTs excel. At this scale, the convolutional inductive bias (local receptive fields, parameter sharing) is strictly beneficial. Maia-1 and Maia-2 both validated this choice empirically. A ViT would need significantly more data and computation to match.
 
-**1,968-index move vocabulary over 4,096 from-to encoding.** A flat 64x64 from-to scheme cannot distinguish underpromotions (e7e8=Q vs e7e8=R share the same from-to pair). The 1,968-index Leela/Maia scheme handles all legal move types including underpromotions, is well-tested in production models, and produces a manageable softmax output.
+**1,858-index move vocabulary over 4,096 from-to encoding.** A flat 64x64 from-to scheme cannot distinguish underpromotions (e7e8=Q vs e7e8=R share the same from-to pair). The 1,858-index Leela/Maia scheme handles all legal move types including underpromotions, is well-tested in production models, and produces a manageable softmax output. The theoretical maximum is 4,672 entries (64 squares × 73 move types), but pruning illegal combinations (e.g., queen-like moves from rank 8 going further north) reduces this to 1,858.
 
 **HTTP between Node.js and Python over gRPC.** FastAPI generates OpenAPI docs automatically, debugging is trivial with standard HTTP tools, and the 1-2ms overhead is negligible compared to the 50-200ms model inference. gRPC can be swapped in later if throughput demands it — the service boundary is clean.
 
