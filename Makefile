@@ -1,4 +1,4 @@
-.PHONY: setup dev dev-ml dev-backend dev-frontend test lint clean docker-up docker-down
+.PHONY: setup dev dev-local dev-ml dev-backend dev-frontend test lint clean docker-up docker-down
 
 # ── Setup ────────────────────────────────────────────────────────────
 setup:
@@ -10,8 +10,7 @@ setup:
 
 # ── Development ──────────────────────────────────────────────────────
 dev:
-	docker compose up postgres redis -d
-	$(MAKE) dev-ml & $(MAKE) dev-backend & $(MAKE) dev-frontend & wait
+	./start-dev.sh
 
 dev-ml:
 	cd ml && uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
@@ -50,17 +49,17 @@ download-stockfish:
 	cd ml && bash scripts/download_stockfish.sh
 
 fetch-data:
-	cd ml && python scripts/fetch_lichess_data.py
+	cd ml && python3 scripts/fetch_lichess_data.py
 
 preprocess:
-	cd ml && python scripts/preprocess_corpus.py
+	cd ml && python3 scripts/preprocess_corpus.py
 
 train:
-	cd ml && python scripts/train.py
+	cd ml && python3 scripts/train.py
 
 # ── Clean ────────────────────────────────────────────────────────────
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name dist -exec rm -rf {} + 2>/dev/null || true
-	rm -rf ml/.pytest_cache backend/coverage frontend/dist
+	rm -rf ml/.pytest_cache backend/coverage frontend/dist .dev-logs

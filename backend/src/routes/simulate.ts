@@ -70,7 +70,8 @@ simulateRouter.post("/start", (req: Request, res: Response) => {
  */
 simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
   try {
-    const session = sessions.get(req.params.sessionId);
+    const sessionId = req.params.sessionId as string;
+    const session = sessions.get(sessionId);
     if (!session) {
       res.status(404).json({ success: false, error: "Session not found" });
       return;
@@ -158,7 +159,8 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
  * Get current session state.
  */
 simulateRouter.get("/:sessionId", (req: Request, res: Response) => {
-  const session = sessions.get(req.params.sessionId);
+  const sessionId = req.params.sessionId as string;
+  const session = sessions.get(sessionId);
   if (!session) {
     res.status(404).json({ success: false, error: "Session not found" });
     return;
