@@ -3,6 +3,7 @@ import { Chessboard } from "react-chessboard";
 import { useChessGame } from "../../hooks/useChessGame";
 import { useGameStore } from "../../store/gameStore";
 import { usePlayerStore } from "../../store/playerStore";
+import { CapturedPieces } from "./CapturedPieces";
 import type { Square, Piece } from "react-chessboard/dist/chessboard/types";
 
 const MAX_BOARD_SIZE = 560;
@@ -37,12 +38,12 @@ export function ChessBoard() {
     if (prediction.engineBest) {
       const from = prediction.engineBest.slice(0, 2) as Square;
       const to = prediction.engineBest.slice(2, 4) as Square;
-      customArrows.push([from, to, "rgba(99, 102, 241, 0.4)"]);
+      customArrows.push([from, to, "rgba(91, 141, 239, 0.4)"]);
     }
     if (prediction.move) {
       const from = prediction.move.slice(0, 2) as Square;
       const to = prediction.move.slice(2, 4) as Square;
-      customArrows.push([from, to, "rgba(34, 197, 94, 0.5)"]);
+      customArrows.push([from, to, "rgba(74, 222, 128, 0.5)"]);
     }
   }
 
@@ -60,33 +61,54 @@ export function ChessBoard() {
         <div className="flex items-center gap-2.5">
           <span className={`w-2 h-2 rounded-full transition-all duration-500 ${
             !isPlayerTurn && !isGameOver && !isViewingHistory
-              ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]"
+              ? "bg-human shadow-[0_0_8px_rgba(74,222,128,0.5)]"
               : "bg-zinc-700"
           }`} />
           <span className="text-xs text-zinc-400 font-medium truncate max-w-[200px]">
             {opponentName}
           </span>
+          <CapturedPieces color={playerColor === "w" ? "black" : "white"} />
         </div>
         {isLoading && (
           <span className="flex items-center gap-2 text-xs text-zinc-500">
-            <span className="w-3 h-3 border-[1.5px] border-indigo-500/30 border-t-indigo-400 rounded-full animate-spin" />
+            <span className="w-3 h-3 border-[1.5px] border-gold/30 border-t-gold rounded-full animate-spin" />
             <span className="font-light">Thinking</span>
           </span>
         )}
         {isViewingHistory && (
-          <span className="text-[10px] text-amber-400/70 font-medium bg-amber-400/[0.06] px-2 py-0.5 rounded-md">
+          <span className="text-[10px] text-inaccuracy/70 font-medium bg-inaccuracy/[0.06] px-2 py-0.5 rounded-md">
             Viewing history
           </span>
         )}
       </div>
 
-      {/* Board wrapper with glow */}
+      {/* Board */}
       <div className="rounded-lg overflow-hidden shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]">
         <Chessboard
           position={fen}
           onPieceDrop={(src, tgt, piece) => {
             if (isViewingHistory) return false;
+            // Non-promotion moves go through directly
             return onPieceDrop(src, tgt, piece);
+          }}
+          onPromotionCheck={(sourceSquare, targetSquare, piece) => {
+            // Check if a pawn is reaching the last rank
+            return (
+              piece[1] === "P" &&
+              ((piece[0] === "w" && targetSquare[1] === "8") ||
+                (piece[0] === "b" && targetSquare[1] === "1"))
+            );
+          }}
+          onPromotionPieceSelect={(piece, promoteFromSquare, promoteToSquare) => {
+            if (piece && promoteFromSquare && promoteToSquare) {
+              const promoMap: Record<string, string> = {
+                wQ: "q", wR: "r", wB: "b", wN: "n",
+                bQ: "q", bR: "r", bB: "b", bN: "n",
+              };
+              const promotion = promoMap[piece] || "q";
+              return onPieceDrop(promoteFromSquare, promoteToSquare, piece, promotion);
+            }
+            return false;
           }}
           customArrows={customArrows}
           boardWidth={boardSize}
@@ -106,10 +128,11 @@ export function ChessBoard() {
         <div className="flex items-center gap-2.5">
           <span className={`w-2 h-2 rounded-full transition-all duration-500 ${
             isPlayerTurn && !isGameOver && !isViewingHistory
-              ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]"
+              ? "bg-human shadow-[0_0_8px_rgba(74,222,128,0.5)]"
               : "bg-zinc-700"
           }`} />
           <span className="text-xs text-zinc-200 font-medium">You</span>
+          <CapturedPieces color={playerColor === "w" ? "white" : "black"} />
         </div>
         {isGameOver && (
           <span className="text-xs text-zinc-500 font-medium bg-white/[0.04] px-2.5 py-0.5 rounded-md">
@@ -119,7 +142,7 @@ export function ChessBoard() {
         {prediction && !isLoading && !isGameOver && viewIndex === -1 && (
           <span className="text-xs text-zinc-500 font-mono flex items-center gap-1.5">
             <span className="text-zinc-400">{prediction.move}</span>
-            <span className="text-emerald-400/70 font-semibold">
+            <span className="text-human/70 font-semibold">
               {(prediction.probability * 100).toFixed(0)}%
             </span>
           </span>

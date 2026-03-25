@@ -14,17 +14,8 @@ export function useChessGame() {
   } = useGameStore();
 
   const onPieceDrop = useCallback(
-    (sourceSquare: string, targetSquare: string, piece: string): boolean => {
-      const isPromotion =
-        piece[1] === "P" &&
-        ((piece[0] === "w" && targetSquare[1] === "8") ||
-          (piece[0] === "b" && targetSquare[1] === "1"));
-
-      return makeMove(
-        sourceSquare,
-        targetSquare,
-        isPromotion ? "q" : undefined
-      );
+    (sourceSquare: string, targetSquare: string, piece: string, promotion?: string): boolean => {
+      return makeMove(sourceSquare, targetSquare, promotion);
     },
     [makeMove]
   );

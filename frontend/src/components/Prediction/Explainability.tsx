@@ -14,7 +14,7 @@ export function Explainability() {
           className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
             explanation.is_deviation
               ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.3)]"
-              : "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.3)]"
+              : "bg-human shadow-[0_0_6px_rgba(74,222,128,0.3)]"
           }`}
         />
         <p className="text-zinc-400 leading-relaxed font-light">

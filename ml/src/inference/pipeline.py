@@ -23,6 +23,7 @@ from src.models.move_encoding import (
 )
 from src.data.preprocessing import board_to_tensor
 from src.inference.sampler import sample_move, SampledMove, StyleOverrides
+from src.data.opening_book import OpeningBook
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class PredictionPipeline:
         self.model: MovePredictor | None = None
         self.device = torch.device("cpu")
         self.has_checkpoint = False
+        self.opening_books: dict[str, OpeningBook] = {}  # player_key → book
 
     def load_model(self, checkpoint_path: str | None = None):
         """Load model from checkpoint or initialize fresh."""
@@ -64,6 +66,11 @@ class PredictionPipeline:
         self.model.eval()
         logger.info(f"Model running on device: {self.device}")
 
+    def set_opening_book(self, player_key: str, book: OpeningBook) -> None:
+        """Register an opening book for a player."""
+        self.opening_books[player_key] = book
+        logger.info(f"Set opening book for {player_key}: {book.total_games} games, {book.size} nodes")
+
     @torch.no_grad()
     def predict(
         self,
@@ -74,6 +81,7 @@ class PredictionPipeline:
         player_rating: float = 1500.0,
         style: StyleOverrides | None = None,
         engine_top_moves: list[dict] | None = None,
+        player_key: str | None = None,
     ) -> SampledMove:
         """Predict a move for the given position."""
         if self.model is None:
@@ -81,14 +89,20 @@ class PredictionPipeline:
 
         board = chess.Board(fen)
 
+        # Look up opening book probabilities
+        opening_book_probs: dict[str, float] | None = None
+        if player_key and player_key in self.opening_books and move_history:
+            book = self.opening_books[player_key]
+            opening_book_probs = book.get_move_probabilities(move_history) or None
+
         if self.has_checkpoint:
             return self._predict_with_model(
                 board, move_history, player_id, player_stats,
-                player_rating, style, engine_top_moves,
+                player_rating, style, engine_top_moves, opening_book_probs,
             )
         else:
             return self._predict_with_stockfish_fallback(
-                board, player_rating, style, engine_top_moves,
+                board, player_rating, style, engine_top_moves, opening_book_probs,
             )
 
     def _predict_with_model(
@@ -100,6 +114,7 @@ class PredictionPipeline:
         player_rating: float,
         style: StyleOverrides | None,
         engine_top_moves: list[dict] | None,
+        opening_book_probs: dict[str, float] | None = None,
     ) -> SampledMove:
         """Run the neural network model for prediction."""
         board_tensor = torch.from_numpy(board_to_tensor(board)).unsqueeze(0).to(self.device)
@@ -140,6 +155,7 @@ class PredictionPipeline:
             player_rating=player_rating,
             style=style,
             engine_top_moves=engine_top_moves,
+            opening_book_probs=opening_book_probs,
         )
 
     def _predict_with_stockfish_fallback(
@@ -148,6 +164,7 @@ class PredictionPipeline:
         player_rating: float,
         style: StyleOverrides | None,
         engine_top_moves: list[dict] | None,
+        opening_book_probs: dict[str, float] | None = None,
     ) -> SampledMove:
         """Use Stockfish analysis to build a realistic policy distribution.
 
@@ -219,6 +236,7 @@ class PredictionPipeline:
             player_rating=player_rating,
             style=style,
             engine_top_moves=engine_top_moves,
+            opening_book_probs=opening_book_probs,
         )
 
     def _encode_history(

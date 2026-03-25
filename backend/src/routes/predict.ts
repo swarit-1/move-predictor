@@ -10,8 +10,52 @@ import { logger } from "../config";
 
 export const predictRouter = Router();
 
+/**
+ * Validate a FEN string has the correct structure:
+ * 6 fields separated by spaces, board has 8 ranks separated by /,
+ * active color is w or b, etc.
+ */
+function isValidFen(fen: string): boolean {
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length !== 6) return false;
+
+  const [board, turn, castling, enPassant, halfmove, fullmove] = parts;
+
+  // Board: 8 ranks separated by /
+  const ranks = board.split("/");
+  if (ranks.length !== 8) return false;
+
+  for (const rank of ranks) {
+    let count = 0;
+    for (const ch of rank) {
+      if (ch >= "1" && ch <= "8") count += parseInt(ch);
+      else if ("pnbrqkPNBRQK".includes(ch)) count += 1;
+      else return false;
+    }
+    if (count !== 8) return false;
+  }
+
+  // Turn
+  if (turn !== "w" && turn !== "b") return false;
+
+  // Castling
+  if (!/^(-|[KQkq]{1,4})$/.test(castling)) return false;
+
+  // En passant
+  if (!/^(-|[a-h][36])$/.test(enPassant)) return false;
+
+  // Halfmove and fullmove are non-negative integers
+  if (!/^\d+$/.test(halfmove) || !/^\d+$/.test(fullmove)) return false;
+
+  return true;
+}
+
+const fenSchema = z.string().min(10).refine(isValidFen, {
+  message: "Invalid FEN: must have 8 ranks, valid pieces, and 6 space-separated fields",
+});
+
 const predictSchema = z.object({
-  fen: z.string().min(10),
+  fen: fenSchema,
   move_history: z.array(z.string()).optional().default([]),
   player_id: z.number().int().optional().default(0),
   player_rating: z.number().min(0).max(4000).optional().default(1500),
@@ -25,7 +69,7 @@ const predictSchema = z.object({
 });
 
 const analyzeSchema = z.object({
-  fen: z.string().min(10),
+  fen: fenSchema,
   depth: z.number().int().min(1).max(30).optional().default(18),
   num_lines: z.number().int().min(1).max(10).optional().default(5),
 });

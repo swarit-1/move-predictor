@@ -39,8 +39,8 @@ export function PlayerSearch() {
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Enter username..."
           className="flex-1 px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm
-                     text-white placeholder-zinc-600 focus:border-indigo-500/40 focus:outline-none
-                     focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
+                     text-white placeholder-zinc-600 focus:border-gold/40 focus:outline-none
+                     focus:ring-1 focus:ring-gold/20 transition-all duration-200"
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         />
         <button

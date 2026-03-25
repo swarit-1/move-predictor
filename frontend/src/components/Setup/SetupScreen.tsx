@@ -72,16 +72,12 @@ export function SetupScreen({ onStart }: Props) {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Ambient background */}
-      <div className="ambient-orb w-[600px] h-[600px] bg-indigo-500 -top-[200px] -left-[200px]" />
-      <div className="ambient-orb w-[500px] h-[500px] bg-purple-600 -bottom-[150px] -right-[150px]" />
-
-      <div className="w-full max-w-lg relative z-10 animate-fade-in">
+    <div className="min-h-screen bg-surface-0 flex items-center justify-center p-6 relative overflow-hidden">
+      <div className="w-full max-w-lg relative animate-fade-in">
         {/* Title */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <div className="w-8 h-8 rounded-lg bg-gold flex items-center justify-center shadow-lg shadow-gold/20">
               <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path d="M12 2L15 8H9L12 2Z" />
                 <path d="M8 8h8v3H8z" />
@@ -163,7 +159,7 @@ export function SetupScreen({ onStart }: Props) {
                 </svg>
                 {tab.label}
                 {activeTab === tab.key && (
-                  <span className="absolute bottom-0 left-3 right-3 h-[2px] bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full" />
+                  <span className="absolute bottom-0 left-3 right-3 h-[2px] bg-gold rounded-full" />
                 )}
               </button>
             ))}
@@ -202,11 +198,11 @@ export function SetupScreen({ onStart }: Props) {
             <button
               onClick={handleStart}
               disabled={activeTab === "profile" && !opponent && !opponentLoading}
-              className="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400
-                         active:from-indigo-700 active:to-indigo-600
-                         disabled:from-zinc-800 disabled:to-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
-                         rounded-xl text-sm font-semibold text-white transition-all duration-200
-                         shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30
+              className="w-full py-3 bg-gold hover:bg-gold-light
+                         active:bg-gold
+                         disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
+                         rounded-xl text-sm font-semibold text-surface-0 transition-all duration-200
+                         shadow-lg shadow-gold/20 hover:shadow-gold/30
                          disabled:shadow-none"
             >
               Start Game
@@ -272,8 +268,8 @@ function ProfileTab({
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Username..."
           className="flex-1 px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm
-                     text-white placeholder-zinc-600 focus:border-indigo-500/40 focus:outline-none
-                     focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
+                     text-white placeholder-zinc-600 focus:border-gold/40 focus:outline-none
+                     focus:ring-1 focus:ring-gold/20 transition-all duration-200"
           onKeyDown={(e) => e.key === "Enter" && onSearch()}
         />
         <button
@@ -321,11 +317,11 @@ function ProfileTab({
 
           <div className="grid grid-cols-5 gap-1.5">
             {[
-              { label: "AGG", value: opponent.styleSummary.aggression, color: "text-red-400" },
-              { label: "TAC", value: opponent.styleSummary.tactical, color: "text-orange-400" },
-              { label: "ACC", value: opponent.styleSummary.accuracy, color: "text-emerald-400" },
-              { label: "CON", value: opponent.styleSummary.consistency, color: "text-blue-400" },
-              { label: "VAR", value: opponent.styleSummary.opening_diversity, color: "text-purple-400" },
+              { label: "AGG", value: opponent.styleSummary.aggression, color: "text-blunder" },
+              { label: "TAC", value: opponent.styleSummary.tactical, color: "text-inaccuracy" },
+              { label: "ACC", value: opponent.styleSummary.accuracy, color: "text-human" },
+              { label: "CON", value: opponent.styleSummary.consistency, color: "text-engine" },
+              { label: "VAR", value: opponent.styleSummary.opening_diversity, color: "text-gold" },
             ].map((stat) => (
               <div key={stat.label} className="text-center py-2 bg-white/[0.03] rounded-xl">
                 <p className={`text-sm font-bold font-mono ${stat.color}`}>
@@ -398,7 +394,7 @@ function RatingTab({
             onClick={() => setRating(r)}
             className={`py-2 rounded-xl text-xs font-mono font-medium transition-all duration-200 ${
               rating === r
-                ? "bg-indigo-500/[0.12] text-indigo-400 ring-1 ring-indigo-500/25"
+                ? "bg-gold-dim text-gold ring-1 ring-gold/25"
                 : "bg-white/[0.03] text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
             }`}
           >

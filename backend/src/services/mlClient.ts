@@ -67,9 +67,13 @@ class MLClient {
     move_history?: string[];
     player_id?: number;
     player_rating?: number;
-    style_overrides?: Record<string, number>;
+    style_overrides?: {
+      aggression?: number;
+      risk_taking?: number;
+      blunder_frequency?: number;
+    };
   }): Promise<PredictionResult> {
-    const response = await this.client.post("/ml/predict", params);
+    const response = await this.client.post<PredictionResult>("/ml/predict", params);
     return response.data;
   }
 
@@ -78,7 +82,7 @@ class MLClient {
     depth?: number;
     num_lines?: number;
   }): Promise<AnalysisResult> {
-    const response = await this.client.post("/ml/analyze", params);
+    const response = await this.client.post<AnalysisResult>("/ml/analyze", params);
     return response.data;
   }
 

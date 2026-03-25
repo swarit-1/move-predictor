@@ -79,9 +79,9 @@ export function SimulationBoard() {
       {!simulationSessionId ? (
         <button
           onClick={startGame}
-          className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500
-                     rounded-xl text-sm font-semibold text-white transition-all duration-200
-                     shadow-lg shadow-purple-500/20"
+          className="w-full py-3 bg-gold hover:bg-gold-light
+                     rounded-xl text-sm font-semibold text-surface-0 transition-all duration-200
+                     shadow-lg shadow-gold/20"
         >
           Start Game vs {opponent?.username || "AI"}
         </button>
@@ -107,9 +107,8 @@ export function SimulationBoard() {
               <p className="text-sm text-zinc-300 font-medium">Game Over</p>
               <button
                 onClick={startGame}
-                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600
-                           hover:from-purple-500 hover:to-indigo-500
-                           rounded-xl text-sm font-semibold text-white transition-all duration-200"
+                className="px-6 py-2.5 bg-gold hover:bg-gold-light
+                           rounded-xl text-sm font-semibold text-surface-0 transition-all duration-200"
               >
                 Play Again
               </button>

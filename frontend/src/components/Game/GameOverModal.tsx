@@ -30,11 +30,11 @@ export function GameOverModal({ onNewGame }: Props) {
     result = playerWon ? "Victory" : "Defeat";
     description = `Checkmate in ${Math.ceil(moveHistory.length / 2)} moves`;
     resultGradient = playerWon
-      ? "from-emerald-400 to-green-300"
-      : "from-red-400 to-rose-300";
+      ? "from-human to-green-300"
+      : "from-blunder to-rose-300";
     glowColor = playerWon
-      ? "shadow-emerald-500/20"
-      : "shadow-red-500/20";
+      ? "shadow-human/20"
+      : "shadow-blunder/20";
   } else if (chess.isStalemate()) {
     result = "Draw";
     description = "Stalemate — no legal moves";
@@ -88,9 +88,9 @@ export function GameOverModal({ onNewGame }: Props) {
         <div className="flex gap-2.5 pt-1">
           <button
             onClick={onNewGame}
-            className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400
-                       rounded-xl text-sm font-semibold text-white transition-all duration-200
-                       shadow-lg shadow-indigo-500/20"
+            className="flex-1 py-3 bg-gold hover:bg-gold-light
+                       rounded-xl text-sm font-semibold text-surface-0 transition-all duration-200
+                       shadow-lg shadow-gold/20"
           >
             New Game
           </button>

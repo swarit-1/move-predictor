@@ -1,16 +1,33 @@
 import { useGameStore } from "../../store/gameStore";
 import { MoveDistribution } from "./MoveDistribution";
+import { Chess } from "chess.js";
 
 export function PredictionPanel() {
   const prediction = useGameStore((s) => s.prediction);
   const isLoading = useGameStore((s) => s.isLoading);
   const playerColor = useGameStore((s) => s.playerColor);
+  const chess = useGameStore((s) => s.chess);
+  const fen = useGameStore((s) => s.fen);
+  const viewIndex = useGameStore((s) => s.viewIndex);
+
+  // Check game over on the actual game state (not view state)
+  const isGameOver = chess.isGameOver();
+
+  if (isGameOver && !isLoading) {
+    return (
+      <div className="glass-card p-4">
+        <p className="text-xs text-zinc-400 leading-relaxed">
+          Game complete. Click "Review" to analyze moves.
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
       <div className="glass-card p-4">
         <div className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-4 h-4 border-2 border-indigo-500/30 border-t-indigo-400 rounded-full animate-spin" />
+          <span className="w-4 h-4 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
           <span className="font-light">Analyzing position...</span>
         </div>
       </div>
@@ -30,35 +47,57 @@ export function PredictionPanel() {
 
   const matchesEngine = prediction.move === prediction.engineBest;
 
+  // Convert UCI to SAN for display if possible
+  let moveSan = prediction.move;
+  try {
+    const tempChess = new Chess(fen);
+    const from = prediction.move.slice(0, 2);
+    const to = prediction.move.slice(2, 4);
+    const promo = prediction.move.length > 4 ? prediction.move[4] : undefined;
+    const result = tempChess.move({ from, to, promotion: promo });
+    if (result) moveSan = result.san;
+  } catch {
+    // Fall back to UCI
+  }
+
   return (
     <div className="glass-card p-4 space-y-3.5">
       {/* Header row: predicted move + engine comparison */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 bg-emerald-500/[0.08] border border-emerald-500/[0.12] rounded-xl glow-green">
-            <span className="text-sm font-bold text-emerald-400 font-mono">
-              {prediction.move}
+          <div className="px-3 py-1.5 bg-human/[0.08] border border-human/[0.15] rounded-xl">
+            <span className="text-sm font-bold text-human font-mono">
+              {moveSan}
             </span>
           </div>
           <div className="text-xs">
-            <span className="text-emerald-400 font-semibold font-mono">
-              {(prediction.probability * 100).toFixed(0)}%
-            </span>
-            <span className="text-zinc-700 mx-1.5">|</span>
-            <span className="text-zinc-500 font-mono">
-              T={prediction.temperature.toFixed(2)}
-            </span>
+            {/* Confidence bar */}
+            <div className="flex items-center gap-2">
+              <div className="w-16 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-human/60 rounded-full transition-all duration-500"
+                  style={{ width: `${prediction.probability * 100}%` }}
+                />
+              </div>
+              <span className="text-human font-semibold font-mono">
+                {(prediction.probability * 100).toFixed(0)}%
+              </span>
+            </div>
           </div>
         </div>
 
         {prediction.engineBest && (
           <div className="flex items-center gap-2 text-xs">
-            <span className="font-mono text-indigo-400/80">{prediction.engineBest}</span>
-            <span className={`w-2 h-2 rounded-full ${
-              matchesEngine
-                ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.4)]"
-                : "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.3)]"
-            }`} title={matchesEngine ? "Matches engine" : "Deviates from engine"} />
+            <span className="font-mono text-engine/80">{prediction.engineBest}</span>
+            {matchesEngine ? (
+              <span className="text-[10px] text-human/70 bg-human/[0.06] px-1.5 py-0.5 rounded">
+                Engine agrees
+              </span>
+            ) : (
+              <span className="text-[10px] text-gold/70 bg-gold-dim px-1.5 py-0.5 rounded">
+                Human choice
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -75,10 +114,10 @@ export function PredictionPanel() {
           <p className="text-[10px] text-zinc-600 font-medium uppercase tracking-wider">Blunder</p>
           <p className={`text-sm font-bold font-mono mt-0.5 ${
             prediction.blunderProbability > 0.3
-              ? "text-red-400"
+              ? "text-blunder"
               : prediction.blunderProbability > 0.1
-              ? "text-amber-400"
-              : "text-emerald-400"
+              ? "text-inaccuracy"
+              : "text-human"
           }`}>
             {(prediction.blunderProbability * 100).toFixed(0)}%
           </p>

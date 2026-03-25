@@ -1,13 +1,19 @@
-"""Skill-aware move sampling.
+"""Skill-aware move sampling with blind spot biases.
 
-Instead of taking argmax (which would give engine-like play), we sample
-from the predicted move distribution with temperature modulated by:
-- Predicted error level (higher error → higher temperature → more human-like mistakes)
-- Player skill (lower-rated players get higher temperature)
-- Style overrides (user-adjustable sliders for aggression, risk, blunder frequency)
+Move selection combines two systems:
 
-This is the core mechanism that makes the system predict human-like moves
-rather than optimal engine moves.
+1. **Temperature scaling** — modulates randomness based on player rating
+   and predicted error tendency. Reduced range (0.2–1.5) compared to
+   pre-blind-spot era, since structured biases now handle most error modeling.
+
+2. **Blind spot biases** — position-aware logit adjustments that model
+   specific human cognitive errors (tactical blindness, material greed,
+   check attraction, piece preference, king safety neglect). These produce
+   *realistic* mistakes rather than random ones.
+
+The two systems are complementary: blind spots determine *which* mistakes
+are likely, while temperature controls *how often* the player deviates
+from their strongest move.
 """
 
 import torch
@@ -16,6 +22,10 @@ import chess
 from dataclasses import dataclass
 
 from src.models.move_encoding import decode_move, get_legal_move_mask
+from src.inference.blind_spots import (
+    BlindSpotConfig,
+    compute_blind_spot_biases,
+)
 
 
 @dataclass
@@ -38,6 +48,7 @@ class SampledMove:
     top_moves: list[dict]  # [{move_uci, probability, engine_rank}]
     predicted_cpl: float
     blunder_probability: float
+    from_book: bool = False  # True if this move came from the opening book
 
 
 def compute_temperature(
@@ -51,6 +62,10 @@ def compute_temperature(
     Lower temperature = more deterministic (engine-like)
     Higher temperature = more random (human-like, error-prone)
 
+    With blind spot biases handling structured errors, temperature now has
+    a tighter range (0.2–1.5) and primarily controls move-selection variance
+    rather than being the sole source of human-like mistakes.
+
     Args:
         predicted_cpl: Model's predicted centipawn loss.
         blunder_prob: Model's predicted blunder probability.
@@ -58,28 +73,29 @@ def compute_temperature(
         style: Optional style overrides.
 
     Returns:
-        Temperature value (typically 0.3 to 2.0).
+        Temperature value (typically 0.2 to 1.5).
     """
     if style is None:
         style = StyleOverrides()
 
-    # Base temperature from rating (higher rating = lower temperature)
-    # Maps ~600-2800 rating to ~1.5-0.3 temperature
-    rating_temp = max(0.3, 1.8 - (player_rating / 2000.0))
+    # Base temperature from rating — reduced range since blind spots
+    # now handle the heavy lifting for error modeling
+    # Maps ~600-2800 rating to ~1.2-0.2 temperature
+    rating_temp = max(0.2, 1.4 - (player_rating / 2200.0))
 
-    # Adjust based on predicted error tendency
-    error_temp = 0.5 * predicted_cpl + 0.3 * blunder_prob
+    # Lighter error adjustment (blind spots cover most of this now)
+    error_temp = 0.3 * predicted_cpl + 0.2 * blunder_prob
 
     # Style adjustments
     risk_factor = style.risk_taking / 100.0  # 0 to 1
     blunder_factor = style.blunder_frequency / 100.0  # 0 to 1
 
-    temperature = rating_temp + error_temp * 0.5
-    temperature *= (0.5 + risk_factor)  # risk slider scales temperature
-    temperature *= (0.7 + 0.6 * blunder_factor)  # blunder slider
+    temperature = rating_temp + error_temp * 0.3
+    temperature *= (0.6 + 0.8 * risk_factor)  # risk slider scales temperature
+    temperature *= (0.8 + 0.4 * blunder_factor)  # blunder slider (reduced impact)
 
-    # Clamp to reasonable range
-    return max(0.1, min(3.0, temperature))
+    # Tighter clamp — blind spots do the error work, temperature just adds variance
+    return max(0.2, min(1.5, temperature))
 
 
 def apply_style_bias(
@@ -134,11 +150,17 @@ def sample_move(
     player_rating: float = 1500.0,
     style: StyleOverrides | None = None,
     engine_top_moves: list[dict] | None = None,
+    opening_book_probs: dict[str, float] | None = None,
 ) -> SampledMove:
-    """Sample a move using skill-aware temperature scaling.
+    """Sample a move using blind spot biases + temperature scaling.
 
-    This is NOT argmax. We sample from the distribution to produce
-    realistic human play, including occasional mistakes.
+    Pipeline:
+    0. Check opening book (if available and position is in book)
+    1. Apply style bias (aggression)
+    2. Apply blind spot biases (tactical blindness, material greed, etc.)
+    3. Mask illegal moves
+    4. Apply temperature scaling
+    5. Sample from distribution
 
     Args:
         policy_logits: (vocab_size,) tensor of raw logits from the model.
@@ -152,11 +174,34 @@ def sample_move(
     Returns:
         SampledMove with the selected move and metadata.
     """
+    # Check opening book — if the position is in the book, boost book moves
+    from_book = False
+    if opening_book_probs:
+        # Blend book probabilities into logits as strong priors
+        from src.models.move_encoding import encode_move as _enc
+        for move_uci, book_prob in opening_book_probs.items():
+            try:
+                move = chess.Move.from_uci(move_uci)
+                if move in board.legal_moves:
+                    idx = _enc(move, board)
+                    # Strong logit boost proportional to book frequency
+                    policy_logits[idx] += 3.0 * book_prob
+                    from_book = True
+            except (ValueError, IndexError):
+                continue
+
     # Get legal move mask
     legal_mask = torch.from_numpy(get_legal_move_mask(board)).to(policy_logits.device)
 
-    # Apply style bias
+    # Apply style bias (aggression)
     logits = apply_style_bias(policy_logits, board, style)
+
+    # Apply blind spot biases — structured human error modeling
+    blind_spot_config = BlindSpotConfig.from_rating(player_rating)
+    bs_result = compute_blind_spot_biases(
+        logits, board, blind_spot_config, engine_top_moves,
+    )
+    logits = bs_result.modified_logits
 
     # Mask illegal moves
     logits[~legal_mask] = float("-inf")
@@ -203,4 +248,5 @@ def sample_move(
         top_moves=top_moves,
         predicted_cpl=predicted_cpl,
         blunder_probability=blunder_prob,
+        from_book=from_book,
     )

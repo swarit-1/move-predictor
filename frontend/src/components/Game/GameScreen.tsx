@@ -80,13 +80,10 @@ export function GameScreen({ onBack }: Props) {
   }, [moveHistory.length, chess, playerColor, fetchPrediction]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col relative overflow-hidden">
-      {/* Ambient orbs */}
-      <div className="ambient-orb w-[500px] h-[500px] bg-indigo-600 top-[-200px] left-[20%]" />
-      <div className="ambient-orb w-[400px] h-[400px] bg-purple-600 bottom-[-100px] right-[10%]" />
+    <div className="min-h-screen bg-surface-0 text-zinc-100 flex flex-col">
 
       {/* Top bar */}
-      <header className="border-b border-white/[0.04] bg-[#0a0a0f]/80 backdrop-blur-xl flex-shrink-0 sticky top-0 z-20">
+      <header className="border-b border-white/[0.04] bg-surface-0/90 flex-shrink-0 sticky top-0 z-20">
         <div className="max-w-[1360px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <button
             onClick={onBack}
@@ -108,7 +105,7 @@ export function GameScreen({ onBack }: Props) {
               onClick={() => setShowStylePanel(!showStylePanel)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 ${
                 showStylePanel
-                  ? "text-indigo-400 bg-indigo-500/[0.08]"
+                  ? "text-gold bg-gold-dim"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]"
               }`}
               title="Adjust opponent style"
@@ -140,7 +137,7 @@ export function GameScreen({ onBack }: Props) {
               onClick={() => setShowEvalGraph(!showEvalGraph)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 ${
                 showEvalGraph
-                  ? "text-emerald-400 bg-emerald-500/[0.08]"
+                  ? "text-human bg-human/[0.08]"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]"
               }`}
               title="Toggle eval graph"
@@ -170,7 +167,7 @@ export function GameScreen({ onBack }: Props) {
       )}
 
       {/* Main game area */}
-      <main className="flex-1 flex items-start justify-center pt-5 sm:pt-8 pb-16 px-2 sm:px-6 relative z-10">
+      <main className="flex-1 flex items-start justify-center pt-5 sm:pt-8 pb-16 px-2 sm:px-6">
         <div className="flex flex-col lg:flex-row gap-5 lg:gap-6 items-center lg:items-start w-full max-w-[1040px]">
           {/* Eval bar + Board */}
           <div className="flex items-start gap-3 flex-shrink-0">

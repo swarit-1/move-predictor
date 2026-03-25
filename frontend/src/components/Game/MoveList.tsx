@@ -38,7 +38,7 @@ export function MoveList() {
         {viewIndex !== -1 && (
           <button
             onClick={goToLatest}
-            className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors duration-200 font-medium"
+            className="text-[10px] text-gold hover:text-gold-light transition-colors duration-200 font-medium"
           >
             Latest
           </button>
@@ -57,7 +57,7 @@ export function MoveList() {
                 onClick={() => goToMove(pair.whiteIdx)}
                 className={`w-16 text-left px-2 py-[3px] rounded-md transition-all duration-150 ${
                   currentIndex === pair.whiteIdx
-                    ? "bg-indigo-500/[0.12] text-indigo-300 ring-1 ring-indigo-500/20"
+                    ? "bg-gold-dim text-gold ring-1 ring-gold/20"
                     : "text-zinc-300 hover:bg-white/[0.04] hover:text-white"
                 }`}
               >
@@ -68,7 +68,7 @@ export function MoveList() {
                   onClick={() => goToMove(pair.blackIdx)}
                   className={`w-16 text-left px-2 py-[3px] rounded-md transition-all duration-150 ${
                     currentIndex === pair.blackIdx
-                      ? "bg-indigo-500/[0.12] text-indigo-300 ring-1 ring-indigo-500/20"
+                      ? "bg-gold-dim text-gold ring-1 ring-gold/20"
                       : "text-zinc-400 hover:bg-white/[0.04] hover:text-white"
                   }`}
                 >

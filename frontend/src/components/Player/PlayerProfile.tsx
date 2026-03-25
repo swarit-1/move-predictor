@@ -23,11 +23,11 @@ export function PlayerProfile() {
       </p>
 
       <div className="space-y-2">
-        <StyleBar label="Aggression" value={style.aggression} color="red" />
-        <StyleBar label="Tactical" value={style.tactical} color="orange" />
-        <StyleBar label="Accuracy" value={style.accuracy} color="emerald" />
-        <StyleBar label="Consistency" value={style.consistency} color="blue" />
-        <StyleBar label="Opening Variety" value={style.opening_diversity} color="purple" />
+        <StyleBar label="Aggression" value={style.aggression} color="blunder" />
+        <StyleBar label="Tactical" value={style.tactical} color="inaccuracy" />
+        <StyleBar label="Accuracy" value={style.accuracy} color="human" />
+        <StyleBar label="Consistency" value={style.consistency} color="engine" />
+        <StyleBar label="Opening Variety" value={style.opening_diversity} color="gold" />
       </div>
 
       {Object.keys(style.preferred_openings).length > 0 && (
@@ -59,11 +59,11 @@ function StyleBar({
   color: string;
 }) {
   const colorMap: Record<string, string> = {
-    red: "bg-red-500/60",
-    orange: "bg-orange-500/60",
-    emerald: "bg-emerald-500/60",
-    blue: "bg-blue-500/60",
-    purple: "bg-purple-500/60",
+    blunder: "bg-blunder/60",
+    inaccuracy: "bg-inaccuracy/60",
+    human: "bg-human/60",
+    engine: "bg-engine/60",
+    gold: "bg-gold/60",
   };
 
   return (

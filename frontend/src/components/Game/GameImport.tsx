@@ -64,7 +64,7 @@ export function GameImport() {
             onClick={() => setSource(s)}
             className={`flex-1 py-2 rounded-xl text-xs font-medium transition-all duration-200 ${
               source === s
-                ? "bg-indigo-500/[0.12] text-indigo-400 ring-1 ring-indigo-500/20"
+                ? "bg-gold-dim text-gold ring-1 ring-gold/20"
                 : "bg-white/[0.03] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06]"
             }`}
           >
@@ -79,8 +79,8 @@ export function GameImport() {
         onChange={(e) => setUsername(e.target.value)}
         placeholder="Username"
         className="w-full px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm
-                   text-white placeholder-zinc-600 focus:border-indigo-500/40 focus:outline-none
-                   focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
+                   text-white placeholder-zinc-600 focus:border-gold/40 focus:outline-none
+                   focus:ring-1 focus:ring-gold/20 transition-all duration-200"
         onKeyDown={(e) => e.key === "Enter" && handleImport()}
       />
 
@@ -99,10 +99,10 @@ export function GameImport() {
       <button
         onClick={handleImport}
         disabled={loading || !username.trim()}
-        className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400
-                   disabled:from-zinc-800 disabled:to-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
-                   rounded-xl text-sm font-semibold text-white transition-all duration-200
-                   shadow-lg shadow-indigo-500/20 disabled:shadow-none"
+        className="w-full py-2.5 bg-gold hover:bg-gold-light
+                   disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
+                   rounded-xl text-sm font-semibold text-surface-0 transition-all duration-200
+                   shadow-lg shadow-gold/20 disabled:shadow-none"
       >
         {loading ? "Importing..." : "Fetch Games"}
       </button>
@@ -126,7 +126,7 @@ export function GameImport() {
       </label>
 
       {result && (
-        <p className="text-xs text-emerald-400 font-light">{result}</p>
+        <p className="text-xs text-human font-light">{result}</p>
       )}
       {error && (
         <p className="text-xs text-red-400 font-light">{error}</p>

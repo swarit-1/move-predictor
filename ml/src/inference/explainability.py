@@ -98,7 +98,7 @@ def explain_prediction(
             else:
                 factors.append(
                     "Model's move is not in engine's top 5 — "
-                    "this reflects a human blind spot or stylistic preference"
+                    "a human blind spot: material greed, check attraction, or tactical miss"
                 )
 
         if cp_cost is not None and cp_cost > 0:

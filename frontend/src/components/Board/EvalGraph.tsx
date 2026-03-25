@@ -22,8 +22,8 @@ export function EvalGraph() {
     );
   }
 
-  const data = evalHistory.map((entry) => ({
-    move: entry.moveNumber,
+  const data = evalHistory.map((entry, index) => ({
+    move: index + 1,
     eval: entry.mate !== null
       ? (entry.mate > 0 ? 10 : -10)
       : Math.max(-10, Math.min(10, entry.cp / 100)),
@@ -38,12 +38,12 @@ export function EvalGraph() {
         <AreaChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
           <defs>
             <linearGradient id="evalGradientPos" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#22c55e" stopOpacity={0.25} />
-              <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+              <stop offset="0%" stopColor="#4ADE80" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="#4ADE80" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="evalGradientNeg" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#ef4444" stopOpacity={0} />
-              <stop offset="100%" stopColor="#ef4444" stopOpacity={0.25} />
+              <stop offset="0%" stopColor="#F87171" stopOpacity={0} />
+              <stop offset="100%" stopColor="#F87171" stopOpacity={0.25} />
             </linearGradient>
           </defs>
           <XAxis
@@ -51,7 +51,8 @@ export function EvalGraph() {
             tick={{ fontSize: 9, fill: "#52525b" }}
             axisLine={false}
             tickLine={false}
-            interval="preserveStartEnd"
+            tickFormatter={(value) => value % 5 === 0 ? `${value}` : ""}
+            interval={0}
           />
           <YAxis
             domain={[-10, 10]}
@@ -60,13 +61,12 @@ export function EvalGraph() {
           <ReferenceLine y={0} stroke="rgba(255,255,255,0.06)" strokeDasharray="2 2" />
           <Tooltip
             contentStyle={{
-              backgroundColor: "rgba(10, 10, 15, 0.95)",
+              backgroundColor: "rgba(11, 11, 17, 0.95)",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: "10px",
               fontSize: "11px",
               color: "#d4d4d8",
               padding: "6px 10px",
-              backdropFilter: "blur(8px)",
             }}
             formatter={(value: number) => [`${value > 0 ? "+" : ""}${value.toFixed(1)}`, "Eval"]}
             labelFormatter={(label) => `Move ${label}`}
@@ -74,11 +74,11 @@ export function EvalGraph() {
           <Area
             type="monotone"
             dataKey="eval"
-            stroke="#6366f1"
+            stroke="#C9A84C"
             strokeWidth={1.5}
             fill="url(#evalGradientPos)"
             dot={false}
-            activeDot={{ r: 3, fill: "#6366f1", strokeWidth: 0 }}
+            activeDot={{ r: 3, fill: "#C9A84C", strokeWidth: 0 }}
           />
         </AreaChart>
       </ResponsiveContainer>
