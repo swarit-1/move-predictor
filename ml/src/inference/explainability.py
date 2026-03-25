@@ -4,7 +4,6 @@ Compares the model's prediction against the engine's best move and
 generates human-readable explanations for the deviation.
 """
 
-import chess
 from dataclasses import dataclass
 
 from src.inference.sampler import SampledMove
@@ -98,7 +97,7 @@ def explain_prediction(
                 )
             else:
                 factors.append(
-                    f"Model's move is not in engine's top 5 — "
+                    "Model's move is not in engine's top 5 — "
                     "this reflects a human blind spot or stylistic preference"
                 )
 

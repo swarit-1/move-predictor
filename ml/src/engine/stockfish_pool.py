@@ -8,7 +8,6 @@ to avoid GIL contention.
 import logging
 from concurrent.futures import ProcessPoolExecutor, Future
 from dataclasses import dataclass
-from functools import partial
 
 from stockfish import Stockfish
 

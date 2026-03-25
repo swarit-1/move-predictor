@@ -18,7 +18,6 @@ from src.models.sequence_encoder import SequenceEncoder
 from src.models.player_embedding import PlayerEmbeddingModule
 from src.models.fusion import SkillAwareFusion
 from src.models.heads import PolicyHead, ValueHead, ErrorHead
-from src.config import settings
 
 
 class MovePredictor(nn.Module):

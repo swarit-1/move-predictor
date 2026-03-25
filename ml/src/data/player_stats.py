@@ -7,7 +7,7 @@ import numpy as np
 import chess
 import chess.pgn
 from io import StringIO
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

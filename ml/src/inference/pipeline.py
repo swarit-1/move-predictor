@@ -8,7 +8,6 @@ prediction with skill-level calibration.
 """
 
 import logging
-import math
 import random
 from pathlib import Path
 

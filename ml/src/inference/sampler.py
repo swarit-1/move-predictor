@@ -12,11 +12,10 @@ rather than optimal engine moves.
 
 import torch
 import torch.nn.functional as F
-import numpy as np
 import chess
 from dataclasses import dataclass
 
-from src.models.move_encoding import decode_move, get_legal_move_mask, NUM_MOVES
+from src.models.move_encoding import decode_move, get_legal_move_mask
 
 
 @dataclass

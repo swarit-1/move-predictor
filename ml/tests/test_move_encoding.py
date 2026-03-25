@@ -1,7 +1,6 @@
 """Tests for move encoding: encode/decode roundtrip and correctness."""
 
 import chess
-import pytest
 from src.models.move_encoding import (
     encode_move, decode_move, get_legal_move_mask, NUM_MOVES, encode_all_legal_moves,
 )

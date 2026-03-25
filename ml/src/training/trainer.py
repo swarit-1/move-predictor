@@ -7,7 +7,6 @@ Supports all three training phases:
 """
 
 import logging
-import time
 from pathlib import Path
 
 import torch
