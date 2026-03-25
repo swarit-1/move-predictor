@@ -4,13 +4,13 @@ import { MoveDistribution } from "./MoveDistribution";
 export function PredictionPanel() {
   const prediction = useGameStore((s) => s.prediction);
   const isLoading = useGameStore((s) => s.isLoading);
+  const playerColor = useGameStore((s) => s.playerColor);
 
   if (isLoading) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <p className="text-xs font-medium text-gray-500 mb-3">Prediction</p>
+      <div className="bg-gray-900/80 border border-gray-800/60 rounded-xl p-4">
         <div className="flex items-center gap-2.5 text-sm text-gray-400">
-          <span className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-500 rounded-full animate-spin" />
+          <span className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
           Analyzing position...
         </div>
       </div>
@@ -18,79 +18,66 @@ export function PredictionPanel() {
   }
 
   if (!prediction) {
+    const colorName = playerColor === "w" ? "White" : "Black";
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <p className="text-xs font-medium text-gray-500 mb-2">Prediction</p>
-        <p className="text-xs text-gray-600">
-          Make a move as White to see the model's prediction for Black.
+      <div className="bg-gray-900/80 border border-gray-800/60 rounded-xl p-4">
+        <p className="text-xs text-gray-500 leading-relaxed">
+          Make a move as {colorName} to see the opponent's predicted response.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
-      <p className="text-xs font-medium text-gray-500">Prediction</p>
-
-      {/* Main prediction */}
-      <div className="flex items-center gap-3">
-        <div className="px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
-          <span className="text-base font-bold text-green-400 font-mono">
-            {prediction.move}
-          </span>
-        </div>
-        <div className="text-xs space-y-1">
-          <p className="text-gray-400">
-            Confidence{" "}
+    <div className="bg-gray-900/80 border border-gray-800/60 rounded-xl p-4 space-y-3">
+      {/* Header row: predicted move + engine comparison */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="px-2.5 py-1.5 bg-green-500/10 border border-green-500/15 rounded-lg">
+            <span className="text-sm font-bold text-green-400 font-mono">
+              {prediction.move}
+            </span>
+          </div>
+          <div className="text-xs">
             <span className="text-green-400 font-medium font-mono">
-              {(prediction.probability * 100).toFixed(1)}%
+              {(prediction.probability * 100).toFixed(0)}%
             </span>
-          </p>
-          <p className="text-gray-500">
-            Temp{" "}
-            <span className="text-gray-400 font-mono">
-              {prediction.temperature.toFixed(2)}
+            <span className="text-gray-600 mx-1.5">/</span>
+            <span className="text-gray-500 font-mono">
+              T={prediction.temperature.toFixed(2)}
             </span>
-          </p>
+          </div>
         </div>
+
+        {prediction.engineBest && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="font-mono text-blue-400/80">{prediction.engineBest}</span>
+            {prediction.move === prediction.engineBest ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Matches engine" />
+            ) : (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Deviates from engine" />
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Engine comparison */}
-      {prediction.engineBest && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-gray-500">Engine best</span>
-          <span className="font-mono text-blue-400">{prediction.engineBest}</span>
-          {prediction.move === prediction.engineBest ? (
-            <span className="px-1.5 py-0.5 bg-green-500/10 text-green-400/80 rounded text-[10px]">
-              Match
-            </span>
-          ) : (
-            <span className="px-1.5 py-0.5 bg-yellow-500/10 text-yellow-400/80 rounded text-[10px]">
-              Deviation
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-gray-800/50 rounded-lg p-2.5">
-          <p className="text-[10px] text-gray-500 mb-0.5">Predicted CPL</p>
-          <p className="text-sm font-semibold font-mono text-gray-200">
+      {/* Stats row */}
+      <div className="flex gap-2">
+        <div className="flex-1 bg-gray-800/40 rounded-lg px-3 py-2">
+          <p className="text-[10px] text-gray-500">CPL</p>
+          <p className="text-sm font-semibold font-mono text-gray-300">
             {prediction.predictedCpl.toFixed(0)}
           </p>
         </div>
-        <div className="bg-gray-800/50 rounded-lg p-2.5">
-          <p className="text-[10px] text-gray-500 mb-0.5">Blunder Prob</p>
-          <p
-            className={`text-sm font-semibold font-mono ${
-              prediction.blunderProbability > 0.3
-                ? "text-red-400"
-                : prediction.blunderProbability > 0.1
-                ? "text-yellow-400"
-                : "text-green-400"
-            }`}
-          >
+        <div className="flex-1 bg-gray-800/40 rounded-lg px-3 py-2">
+          <p className="text-[10px] text-gray-500">Blunder</p>
+          <p className={`text-sm font-semibold font-mono ${
+            prediction.blunderProbability > 0.3
+              ? "text-red-400"
+              : prediction.blunderProbability > 0.1
+              ? "text-amber-400"
+              : "text-green-400"
+          }`}>
             {(prediction.blunderProbability * 100).toFixed(0)}%
           </p>
         </div>

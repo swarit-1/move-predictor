@@ -35,36 +35,37 @@ export function MoveDistribution({ topMoves, engineTopMoves }: Props) {
 
   return (
     <div>
-      <p className="text-[10px] text-gray-500 mb-1">Move Distribution</p>
-      <ResponsiveContainer width="100%" height={110}>
-        <BarChart data={data} layout="vertical" margin={{ left: 35, right: 8 }}>
+      <p className="text-[10px] text-gray-500 mb-1">Top Moves</p>
+      <ResponsiveContainer width="100%" height={100}>
+        <BarChart data={data} layout="vertical" margin={{ left: 32, right: 4, top: 0, bottom: 0 }}>
           <XAxis
             type="number"
             domain={[0, "dataMax"]}
             tickFormatter={(v) => `${v}%`}
-            tick={{ fontSize: 9, fill: "#6b7280" }}
+            tick={{ fontSize: 9, fill: "#4b5563" }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
             type="category"
             dataKey="move"
-            tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "monospace" }}
-            width={35}
+            tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "ui-monospace, monospace" }}
+            width={32}
             axisLine={false}
             tickLine={false}
           />
           <Tooltip
-            formatter={(value: number) => [`${value}%`, "Probability"]}
+            formatter={(value: number) => [`${value}%`, "Prob"]}
             contentStyle={{
               backgroundColor: "#111827",
               border: "1px solid #1f2937",
               borderRadius: "8px",
               fontSize: "11px",
               color: "#d1d5db",
+              padding: "6px 10px",
             }}
           />
-          <Bar dataKey="probability" radius={[0, 3, 3, 0]}>
+          <Bar dataKey="probability" radius={[0, 3, 3, 0]} barSize={14}>
             {data.map((entry, index) => (
               <Cell
                 key={`cell-${index}`}
@@ -75,7 +76,7 @@ export function MoveDistribution({ topMoves, engineTopMoves }: Props) {
                     ? "#3b82f6"
                     : "#374151"
                 }
-                fillOpacity={index === 0 ? 0.7 : 0.5}
+                fillOpacity={index === 0 ? 0.6 : 0.4}
               />
             ))}
           </Bar>

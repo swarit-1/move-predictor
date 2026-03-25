@@ -16,6 +16,8 @@ export function SetupScreen({ onStart }: Props) {
   const [manualRating, setManualRating] = useState(1500);
   const playerColor = useGameStore((s) => s.playerColor);
   const setPlayerColor = useGameStore((s) => s.setPlayerColor);
+  const showEvalBar = useGameStore((s) => s.showEvalBar);
+  const setShowEvalBar = useGameStore((s) => s.setShowEvalBar);
   const { styleOverrides, setStyleOverride, resetStyleOverrides } =
     usePlayerStore();
   const { opponent, opponentLoading, error, fetchProfile } =
@@ -63,97 +65,101 @@ export function SetupScreen({ onStart }: Props) {
     onStart();
   };
 
-  const tabs: { key: OpponentTab; label: string; desc: string }[] = [
-    {
-      key: "profile",
-      label: "Player Profile",
-      desc: "Search for a real player and play against their style",
-    },
-    {
-      key: "rating",
-      label: "By Rating",
-      desc: "Set an opponent rating to simulate skill level",
-    },
-    {
-      key: "style",
-      label: "Custom Style",
-      desc: "Fine-tune aggression, risk, and blunder tendencies",
-    },
+  const tabs: { key: OpponentTab; label: string }[] = [
+    { key: "profile", label: "Player" },
+    { key: "rating", label: "Rating" },
+    { key: "style", label: "Style" },
   ];
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl">
+      <div className="w-full max-w-lg">
         {/* Title */}
-        <div className="text-center mb-10">
-          <h1 className="text-3xl font-semibold tracking-tight text-white">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-white">
             Move Predictor
           </h1>
-          <p className="mt-2 text-sm text-gray-400">
-            Play against an AI that mimics real human playing styles
+          <p className="mt-1.5 text-sm text-gray-500">
+            Play against an AI that mimics human playing styles
           </p>
         </div>
 
         {/* Main card */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-          {/* Color picker */}
-          <div className="px-6 pt-5 pb-4 border-b border-gray-800">
-            <p className="text-xs text-gray-500 mb-3">Play as</p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPlayerColor("w")}
-                className={`flex-1 flex items-center justify-center gap-2.5 py-3 rounded-xl text-sm font-medium transition-all ${
-                  playerColor === "w"
-                    ? "bg-gray-800 text-white ring-1 ring-gray-600"
-                    : "bg-gray-800/30 text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                <span className="w-5 h-5 rounded bg-gray-100 border border-gray-300" />
-                White
-              </button>
-              <button
-                onClick={() => setPlayerColor("b")}
-                className={`flex-1 flex items-center justify-center gap-2.5 py-3 rounded-xl text-sm font-medium transition-all ${
-                  playerColor === "b"
-                    ? "bg-gray-800 text-white ring-1 ring-gray-600"
-                    : "bg-gray-800/30 text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                <span className="w-5 h-5 rounded bg-gray-700 border border-gray-600" />
-                Black
-              </button>
+        <div className="bg-gray-900/80 border border-gray-800/60 rounded-2xl overflow-hidden">
+          {/* Color + Settings row */}
+          <div className="px-5 pt-4 pb-3 border-b border-gray-800/50">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                  Play as
+                </p>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setPlayerColor("w")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                      playerColor === "w"
+                        ? "bg-gray-800 text-white ring-1 ring-gray-600/60"
+                        : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/40"
+                    }`}
+                  >
+                    <span className="w-3.5 h-3.5 rounded-sm bg-gray-100 border border-gray-300" />
+                    White
+                  </button>
+                  <button
+                    onClick={() => setPlayerColor("b")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                      playerColor === "b"
+                        ? "bg-gray-800 text-white ring-1 ring-gray-600/60"
+                        : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/40"
+                    }`}
+                  >
+                    <span className="w-3.5 h-3.5 rounded-sm bg-gray-600 border border-gray-500" />
+                    Black
+                  </button>
+                </div>
+              </div>
+
+              {/* Eval bar toggle */}
+              <div>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                  Eval bar
+                </p>
+                <button
+                  onClick={() => setShowEvalBar(!showEvalBar)}
+                  className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                    showEvalBar
+                      ? "bg-gray-800 text-white ring-1 ring-gray-600/60"
+                      : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/40"
+                  }`}
+                >
+                  {showEvalBar ? "On" : "Off"}
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Tab bar */}
-          <div className="flex border-b border-gray-800">
+          <div className="flex border-b border-gray-800/50 px-1 pt-1">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex-1 px-4 py-3.5 text-sm font-medium transition-colors relative ${
+                className={`flex-1 px-3 py-2.5 text-xs font-medium transition-all relative rounded-t-lg ${
                   activeTab === tab.key
-                    ? "text-white"
+                    ? "text-white bg-gray-800/40"
                     : "text-gray-500 hover:text-gray-300"
                 }`}
               >
                 {tab.label}
                 {activeTab === tab.key && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
+                  <span className="absolute bottom-0 left-2 right-2 h-[2px] bg-blue-500 rounded-full" />
                 )}
               </button>
             ))}
           </div>
 
-          {/* Tab description */}
-          <div className="px-6 pt-5 pb-2">
-            <p className="text-xs text-gray-500">
-              {tabs.find((t) => t.key === activeTab)?.desc}
-            </p>
-          </div>
-
           {/* Tab content */}
-          <div className="px-6 pb-6">
+          <div className="px-5 py-4">
             {activeTab === "profile" && (
               <ProfileTab
                 source={source}
@@ -181,22 +187,21 @@ export function SetupScreen({ onStart }: Props) {
           </div>
 
           {/* Start button */}
-          <div className="px-6 pb-6">
+          <div className="px-5 pb-5">
             <button
               onClick={handleStart}
               disabled={activeTab === "profile" && !opponent && !opponentLoading}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
-                         disabled:text-gray-500 disabled:cursor-not-allowed rounded-xl
-                         text-sm font-semibold text-white transition-colors"
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700
+                         disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed
+                         rounded-xl text-sm font-semibold text-white transition-colors"
             >
               Start Game
             </button>
           </div>
         </div>
 
-        {/* Footer hint */}
-        <p className="text-center text-xs text-gray-600 mt-6">
-          The model predicts the opponent's moves automatically after each of your moves.
+        <p className="text-center text-[11px] text-gray-600 mt-5">
+          Opponent moves are predicted automatically after each of your moves.
         </p>
       </div>
     </div>
@@ -225,16 +230,20 @@ function ProfileTab({
   opponent: any;
 }) {
   return (
-    <div className="space-y-4 mt-3">
-      <div className="flex gap-2">
+    <div className="space-y-3">
+      <p className="text-xs text-gray-500">
+        Search for a real player and play against their style
+      </p>
+
+      <div className="flex gap-1.5">
         {(["lichess", "chesscom"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setSource(s)}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
               source === s
-                ? "bg-gray-700 text-white ring-1 ring-gray-600"
-                : "bg-gray-800/50 text-gray-500 hover:text-gray-300"
+                ? "bg-gray-800 text-white ring-1 ring-gray-600/60"
+                : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/40"
             }`}
           >
             {s === "lichess" ? "Lichess" : "Chess.com"}
@@ -247,23 +256,23 @@ function ProfileTab({
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="Enter username..."
-          className="flex-1 px-4 py-2.5 bg-gray-800/50 border border-gray-700 rounded-lg text-sm
-                     text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none
-                     focus:ring-1 focus:ring-blue-500/30 transition-colors"
+          placeholder="Username..."
+          className="flex-1 px-3.5 py-2 bg-gray-800/40 border border-gray-700/50 rounded-lg text-sm
+                     text-white placeholder-gray-600 focus:border-blue-500/50 focus:outline-none
+                     focus:ring-1 focus:ring-blue-500/20 transition-all"
           onKeyDown={(e) => e.key === "Enter" && onSearch()}
         />
         <button
           onClick={onSearch}
           disabled={loading || !username.trim()}
-          className="px-5 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800
-                     disabled:text-gray-600 disabled:cursor-not-allowed rounded-lg text-sm
+          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50
+                     disabled:text-gray-600 disabled:cursor-not-allowed rounded-lg text-xs
                      font-medium text-white transition-colors"
         >
           {loading ? (
-            <span className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Searching
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 border-[1.5px] border-white/20 border-t-white rounded-full animate-spin" />
+              ...
             </span>
           ) : (
             "Search"
@@ -272,8 +281,8 @@ function ProfileTab({
       </div>
 
       {error && (
-        <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-          <p className="text-sm text-red-400">
+        <div className="px-3 py-2.5 bg-red-500/5 border border-red-500/15 rounded-lg">
+          <p className="text-xs text-red-400/80">
             {error.includes("500") || error.includes("ECONNREFUSED")
               ? "Could not reach the analysis service. Make sure the ML backend is running."
               : error}
@@ -282,22 +291,22 @@ function ProfileTab({
       )}
 
       {opponent && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 space-y-3">
+        <div className="bg-gray-800/30 border border-gray-700/30 rounded-xl p-3.5 space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-white">
                 {opponent.username}
               </p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {opponent.numGames} games analyzed
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                {opponent.numGames} games
               </p>
             </div>
-            <span className="text-sm font-mono font-semibold text-gray-300 bg-gray-700/50 px-3 py-1 rounded-lg">
+            <span className="text-sm font-mono font-semibold text-gray-300 bg-gray-700/40 px-2.5 py-1 rounded-lg">
               {opponent.rating.toFixed(0)}
             </span>
           </div>
 
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-5 gap-1.5">
             {[
               { label: "AGG", value: opponent.styleSummary.aggression, color: "text-red-400" },
               { label: "TAC", value: opponent.styleSummary.tactical, color: "text-orange-400" },
@@ -305,11 +314,11 @@ function ProfileTab({
               { label: "CON", value: opponent.styleSummary.consistency, color: "text-blue-400" },
               { label: "VAR", value: opponent.styleSummary.opening_diversity, color: "text-purple-400" },
             ].map((stat) => (
-              <div key={stat.label} className="text-center">
+              <div key={stat.label} className="text-center py-1.5 bg-gray-800/30 rounded-lg">
                 <p className={`text-sm font-semibold font-mono ${stat.color}`}>
                   {stat.value}
                 </p>
-                <p className="text-[10px] text-gray-500 mt-0.5">{stat.label}</p>
+                <p className="text-[9px] text-gray-500 mt-0.5">{stat.label}</p>
               </div>
             ))}
           </div>
@@ -330,12 +339,27 @@ function RatingTab({
 }) {
   const presets = [800, 1000, 1200, 1500, 1800, 2000, 2200, 2500];
 
+  const ratingLabel =
+    rating < 1000
+      ? "Beginner — frequent blunders and missed tactics"
+      : rating < 1500
+      ? "Intermediate — reasonable moves, occasional mistakes"
+      : rating < 2000
+      ? "Advanced — strong positional play with tactical awareness"
+      : rating < 2400
+      ? "Expert — highly accurate with deep understanding"
+      : "Master — near-optimal play in most positions";
+
   return (
-    <div className="space-y-5 mt-3">
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500">
+        Set an opponent rating to simulate skill level
+      </p>
+
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <label className="text-sm text-gray-400">Opponent Rating</label>
-          <span className="text-lg font-mono font-semibold text-white">
+        <div className="flex items-baseline justify-between mb-2">
+          <label className="text-xs text-gray-400">Opponent Rating</label>
+          <span className="text-xl font-mono font-bold text-white tabular-nums">
             {rating}
           </span>
         </div>
@@ -348,44 +372,31 @@ function RatingTab({
           onChange={(e) => setRating(Number(e.target.value))}
           className="w-full"
         />
-        <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+        <div className="flex justify-between text-[10px] text-gray-600 mt-0.5">
           <span>400</span>
           <span>3000</span>
         </div>
       </div>
 
-      <div>
-        <p className="text-xs text-gray-500 mb-2">Quick select</p>
-        <div className="grid grid-cols-4 gap-2">
-          {presets.map((r) => (
-            <button
-              key={r}
-              onClick={() => setRating(r)}
-              className={`py-2 rounded-lg text-sm font-mono font-medium transition-colors ${
-                rating === r
-                  ? "bg-blue-600/20 text-blue-400 ring-1 ring-blue-500/30"
-                  : "bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-gray-300"
-              }`}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        {presets.map((r) => (
+          <button
+            key={r}
+            onClick={() => setRating(r)}
+            className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+              rating === r
+                ? "bg-blue-600/15 text-blue-400 ring-1 ring-blue-500/25"
+                : "bg-gray-800/40 text-gray-500 hover:bg-gray-800/70 hover:text-gray-300"
+            }`}
+          >
+            {r}
+          </button>
+        ))}
       </div>
 
-      <div className="bg-gray-800/30 rounded-lg px-4 py-3">
-        <p className="text-xs text-gray-500 leading-relaxed">
-          {rating < 1000
-            ? "Beginner level — expect frequent blunders and missed tactics."
-            : rating < 1500
-            ? "Intermediate — reasonable moves with occasional mistakes."
-            : rating < 2000
-            ? "Advanced — strong positional play with tactical awareness."
-            : rating < 2400
-            ? "Expert — highly accurate with deep understanding."
-            : "Master level — near-optimal play in most positions."}
-        </p>
-      </div>
+      <p className="text-[11px] text-gray-500 leading-relaxed bg-gray-800/20 rounded-lg px-3 py-2">
+        {ratingLabel}
+      </p>
     </div>
   );
 }
@@ -407,43 +418,28 @@ function StyleTab({
     low: string;
     high: string;
   }[] = [
-    {
-      key: "aggression",
-      label: "Aggression",
-      low: "Passive",
-      high: "Aggressive",
-    },
-    {
-      key: "risk_taking",
-      label: "Risk Taking",
-      low: "Safe",
-      high: "Risky",
-    },
-    {
-      key: "blunder_frequency",
-      label: "Blunder Frequency",
-      low: "Accurate",
-      high: "Blunder-prone",
-    },
+    { key: "aggression", label: "Aggression", low: "Passive", high: "Aggressive" },
+    { key: "risk_taking", label: "Risk Taking", low: "Safe", high: "Risky" },
+    { key: "blunder_frequency", label: "Blunder Rate", low: "Accurate", high: "Blunder-prone" },
   ];
 
   return (
-    <div className="space-y-5 mt-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-500">Adjust playing style parameters</p>
+        <p className="text-xs text-gray-500">Fine-tune playing style parameters</p>
         <button
           onClick={resetStyleOverrides}
-          className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+          className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors"
         >
-          Reset to defaults
+          Reset
         </button>
       </div>
 
       {sliders.map(({ key, label, low, high }) => (
         <div key={key}>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-sm text-gray-300">{label}</label>
-            <span className="text-sm font-mono font-semibold text-white">
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-gray-300">{label}</label>
+            <span className="text-xs font-mono font-semibold text-white tabular-nums">
               {styleOverrides[key].toFixed(0)}
             </span>
           </div>
@@ -455,7 +451,7 @@ function StyleTab({
             onChange={(e) => setStyleOverride(key, Number(e.target.value))}
             className="w-full"
           />
-          <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+          <div className="flex justify-between text-[10px] text-gray-600 mt-0.5">
             <span>{low}</span>
             <span>{high}</span>
           </div>

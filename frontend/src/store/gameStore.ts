@@ -21,6 +21,11 @@ export interface PredictionData {
   } | null;
 }
 
+export interface PositionEval {
+  cp: number;        // centipawns from White's perspective
+  mate: number | null; // mate in N (positive = White wins)
+}
+
 interface GameState {
   chess: Chess;
   fen: string;
@@ -30,6 +35,11 @@ interface GameState {
   prediction: PredictionData | null;
   isLoading: boolean;
   predictionError: string | null;
+
+  // Persistent position evaluation (independent of predictions)
+  positionEval: PositionEval | null;
+  evalLoading: boolean;
+  showEvalBar: boolean;
 
   // Player color choice
   playerColor: "w" | "b";
@@ -44,6 +54,9 @@ interface GameState {
   setPrediction: (pred: PredictionData | null) => void;
   setLoading: (loading: boolean) => void;
   setPredictionError: (error: string | null) => void;
+  setPositionEval: (eval_: PositionEval | null) => void;
+  setEvalLoading: (loading: boolean) => void;
+  setShowEvalBar: (show: boolean) => void;
   setPlayerColor: (color: "w" | "b") => void;
   setMode: (mode: "analyze" | "simulate") => void;
   setSimulationSession: (id: string | null) => void;
@@ -59,6 +72,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   prediction: null,
   isLoading: false,
   predictionError: null,
+  positionEval: null,
+  evalLoading: false,
+  showEvalBar: true,
   playerColor: "w",
   mode: "analyze",
   simulationSessionId: null,
@@ -108,6 +124,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       pgn: "",
       prediction: null,
       predictionError: null,
+      positionEval: null,
+      evalLoading: false,
       simulationSessionId: null,
     });
   },
@@ -115,6 +133,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   setPrediction: (pred) => set({ prediction: pred }),
   setLoading: (loading) => set({ isLoading: loading }),
   setPredictionError: (error) => set({ predictionError: error }),
+  setPositionEval: (eval_) => set({ positionEval: eval_ }),
+  setEvalLoading: (loading) => set({ evalLoading: loading }),
+  setShowEvalBar: (show) => set({ showEvalBar: show }),
   setPlayerColor: (color) => set({ playerColor: color }),
   setMode: (mode) => set({ mode }),
   setSimulationSession: (id) => set({ simulationSessionId: id }),
