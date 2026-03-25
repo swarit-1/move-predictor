@@ -14,7 +14,7 @@ from src.config import settings
 class SequenceEncoder(nn.Module):
     """Transformer-based move sequence encoder.
 
-    Input:  (B, T) — integer move indices from the 1968-move vocabulary
+    Input:  (B, T) — integer move indices from the 1858-move vocabulary
     Output: (B, d_model) — sequence feature vector
     """
 

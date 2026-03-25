@@ -18,9 +18,47 @@ interface GameSession {
   blackRating: number;
   styleOverrides?: Record<string, number>;
   createdAt: Date;
+  lastAccessedAt: Date;
 }
 
 const sessions = new Map<string, GameSession>();
+
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const MAX_SESSIONS = 1000;
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Run cleanup every 5 minutes
+
+/**
+ * Remove sessions that have exceeded the TTL.
+ * If still over MAX_SESSIONS after TTL eviction, evict LRU sessions.
+ */
+function cleanupSessions(): void {
+  const now = Date.now();
+
+  // 1. TTL-based eviction
+  for (const [id, session] of sessions) {
+    if (now - session.lastAccessedAt.getTime() > SESSION_TTL_MS) {
+      sessions.delete(id);
+    }
+  }
+
+  // 2. LRU eviction if still over limit
+  if (sessions.size > MAX_SESSIONS) {
+    const sorted = [...sessions.entries()].sort(
+      (a, b) => a[1].lastAccessedAt.getTime() - b[1].lastAccessedAt.getTime()
+    );
+    const toRemove = sessions.size - MAX_SESSIONS;
+    for (let i = 0; i < toRemove; i++) {
+      sessions.delete(sorted[i][0]);
+    }
+  }
+}
+
+// Periodic cleanup
+const cleanupInterval = setInterval(cleanupSessions, CLEANUP_INTERVAL_MS);
+// Allow the Node.js process to exit even if the interval is still active
+if (cleanupInterval.unref) {
+  cleanupInterval.unref();
+}
 
 const startSchema = z.object({
   white_player_id: z.number().int().optional().default(0),
@@ -37,6 +75,13 @@ const startSchema = z.object({
 simulateRouter.post("/start", (req: Request, res: Response) => {
   try {
     const params = startSchema.parse(req.body);
+
+    // Enforce session limit before creating a new one
+    if (sessions.size >= MAX_SESSIONS) {
+      cleanupSessions();
+    }
+
+    const now = new Date();
     const session: GameSession = {
       id: uuidv4(),
       chess: new Chess(),
@@ -46,7 +91,8 @@ simulateRouter.post("/start", (req: Request, res: Response) => {
       whiteRating: params.white_rating,
       blackRating: params.black_rating,
       styleOverrides: params.style_overrides,
-      createdAt: new Date(),
+      createdAt: now,
+      lastAccessedAt: now,
     };
 
     sessions.set(session.id, session);
@@ -76,6 +122,9 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
       res.status(404).json({ success: false, error: "Session not found" });
       return;
     }
+
+    // Update LRU timestamp
+    session.lastAccessedAt = new Date();
 
     const { move } = req.body;
 
@@ -165,6 +214,9 @@ simulateRouter.get("/:sessionId", (req: Request, res: Response) => {
     res.status(404).json({ success: false, error: "Session not found" });
     return;
   }
+
+  // Update LRU timestamp
+  session.lastAccessedAt = new Date();
 
   res.json({
     success: true,

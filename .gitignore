@@ -20,12 +20,18 @@ env/
 # Data
 data/raw/
 data/processed/
-data/stockfish/
+**/data/stockfish/
 data/checkpoints/
 *.h5
 *.hdf5
 *.pgn
 *.zst
+
+# Dev logs
+.dev-logs/
+
+# Database files
+*.db
 
 # Node.js
 node_modules/

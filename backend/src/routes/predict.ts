@@ -4,7 +4,6 @@ import { mlClient } from "../services/mlClient";
 import {
   getCached,
   setCache,
-  predictionCacheKey,
   analysisCacheKey,
 } from "../services/cache";
 import { logger } from "../config";
@@ -25,27 +24,24 @@ const predictSchema = z.object({
     .optional(),
 });
 
+const analyzeSchema = z.object({
+  fen: z.string().min(10),
+  depth: z.number().int().min(1).max(30).optional().default(18),
+  num_lines: z.number().int().min(1).max(10).optional().default(5),
+});
+
 /**
  * POST /api/predict
  * Get a human move prediction for a position.
+ *
+ * Predictions are NOT cached because the ML service uses temperature-based
+ * stochastic sampling — the same inputs produce different moves each time.
+ * Caching would return the same "random" move for the entire TTL period.
  */
 predictRouter.post("/", async (req: Request, res: Response) => {
   try {
     const params = predictSchema.parse(req.body);
 
-    // Check cache
-    const cacheKey = predictionCacheKey(
-      params.fen,
-      params.player_id,
-      params.style_overrides
-    );
-    const cached = await getCached(cacheKey);
-    if (cached) {
-      res.json({ success: true, data: cached, cached: true });
-      return;
-    }
-
-    // Call ML service
     const prediction = await mlClient.predict({
       fen: params.fen,
       move_history: params.move_history,
@@ -53,9 +49,6 @@ predictRouter.post("/", async (req: Request, res: Response) => {
       player_rating: params.player_rating,
       style_overrides: params.style_overrides,
     });
-
-    // Cache result
-    await setCache(cacheKey, prediction, 1800); // 30 min TTL
 
     res.json({ success: true, data: prediction });
   } catch (error: any) {
@@ -68,27 +61,31 @@ predictRouter.post("/", async (req: Request, res: Response) => {
 /**
  * POST /api/predict/analyze
  * Get raw Stockfish analysis for a position.
+ * Results are deterministic and cached for 24 hours.
  */
 predictRouter.post("/analyze", async (req: Request, res: Response) => {
   try {
-    const { fen, depth = 18, num_lines = 5 } = req.body;
+    const params = analyzeSchema.parse(req.body);
 
-    // Check cache
-    const cacheKey = analysisCacheKey(fen, depth);
+    const cacheKey = analysisCacheKey(params.fen, params.depth);
     const cached = await getCached(cacheKey);
     if (cached) {
       res.json({ success: true, data: cached, cached: true });
       return;
     }
 
-    const analysis = await mlClient.analyze({ fen, depth, num_lines });
+    const analysis = await mlClient.analyze({
+      fen: params.fen,
+      depth: params.depth,
+      num_lines: params.num_lines,
+    });
 
-    // Cache Stockfish results longer (they're deterministic)
     await setCache(cacheKey, analysis, 86400); // 24 hour TTL
 
     res.json({ success: true, data: analysis });
   } catch (error: any) {
     logger.error("Analysis failed", { error: error.message });
-    res.status(503).json({ success: false, error: error.message });
+    const status = error.name === "ZodError" ? 400 : 503;
+    res.status(status).json({ success: false, error: error.message });
   }
 });

@@ -1,5 +1,6 @@
 """Move prediction endpoint."""
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -58,11 +59,14 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             blunder_frequency=request.style_overrides.get("blunder_frequency", 50.0),
         )
 
-    # Get Stockfish analysis for comparison
+    # Get Stockfish analysis for comparison (non-blocking)
     engine_top_moves = []
     engine_best = None
     try:
-        analysis = stockfish_pool.analyze_sync(request.fen, num_lines=5)
+        loop = asyncio.get_event_loop()
+        analysis = await loop.run_in_executor(
+            None, lambda: stockfish_pool.analyze_sync(request.fen, num_lines=5)
+        )
         engine_best = analysis.best_move
         engine_top_moves = analysis.top_moves
     except Exception:

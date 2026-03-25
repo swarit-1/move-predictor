@@ -1,9 +1,6 @@
 import { useCallback } from "react";
 import { useGameStore } from "../store/gameStore";
 
-/**
- * Hook for managing chess game interactions on the board.
- */
 export function useChessGame() {
   const {
     chess,
@@ -18,7 +15,6 @@ export function useChessGame() {
 
   const onPieceDrop = useCallback(
     (sourceSquare: string, targetSquare: string, piece: string): boolean => {
-      // Determine promotion piece
       const isPromotion =
         piece[1] === "P" &&
         ((piece[0] === "w" && targetSquare[1] === "8") ||

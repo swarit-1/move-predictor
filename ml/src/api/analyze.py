@@ -1,5 +1,6 @@
 """Stockfish analysis endpoint."""
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -33,10 +34,14 @@ async def analyze_position(request: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=400, detail=f"Invalid FEN: {request.fen}")
 
     try:
-        result = stockfish_pool.analyze_sync(
-            fen=request.fen,
-            depth=request.depth,
-            num_lines=request.num_lines,
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: stockfish_pool.analyze_sync(
+                fen=request.fen,
+                depth=request.depth,
+                num_lines=request.num_lines,
+            ),
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=f"Stockfish unavailable: {e}")

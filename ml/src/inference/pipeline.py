@@ -1,4 +1,4 @@
-"""Full prediction pipeline: board state → predicted move.
+"""Full prediction pipeline: board state -> predicted move.
 
 Orchestrates the board encoder, sequence encoder, player embedding,
 and skill-aware sampler into a single inference call.
@@ -39,7 +39,15 @@ class PredictionPipeline:
 
     def load_model(self, checkpoint_path: str | None = None):
         """Load model from checkpoint or initialize fresh."""
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Device selection with Apple Silicon MPS support
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+        self.device = torch.device(device)
+
         self.model = MovePredictor()
 
         if checkpoint_path and Path(checkpoint_path).exists():
@@ -55,6 +63,7 @@ class PredictionPipeline:
 
         self.model = self.model.to(self.device)
         self.model.eval()
+        logger.info(f"Model running on device: {self.device}")
 
     @torch.no_grad()
     def predict(

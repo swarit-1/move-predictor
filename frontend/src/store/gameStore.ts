@@ -22,8 +22,8 @@ export interface PredictionData {
 }
 
 export interface PositionEval {
-  cp: number;        // centipawns from White's perspective
-  mate: number | null; // mate in N (positive = White wins)
+  cp: number;
+  mate: number | null;
 }
 
 interface GameState {
@@ -36,19 +36,21 @@ interface GameState {
   isLoading: boolean;
   predictionError: string | null;
 
-  // Persistent position evaluation (independent of predictions)
   positionEval: PositionEval | null;
   evalLoading: boolean;
   showEvalBar: boolean;
 
-  // Player color choice
   playerColor: "w" | "b";
 
   mode: "analyze" | "simulate";
   simulationSessionId: string | null;
 
+  // Track current viewing position vs full history for move navigation
+  viewIndex: number; // -1 = latest position
+
   setFen: (fen: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
+  applyPredictedMove: (moveUci: string) => boolean;
   undoMove: () => void;
   resetGame: () => void;
   setPrediction: (pred: PredictionData | null) => void;
@@ -62,6 +64,7 @@ interface GameState {
   setSimulationSession: (id: string | null) => void;
   loadPgn: (pgn: string) => void;
   goToMove: (moveIndex: number) => void;
+  goToLatest: () => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -78,27 +81,60 @@ export const useGameStore = create<GameState>((set, get) => ({
   playerColor: "w",
   mode: "analyze",
   simulationSessionId: null,
+  viewIndex: -1,
 
   setFen: (fen) => {
     const chess = new Chess(fen);
-    set({ chess, fen, prediction: null });
+    set({ chess, fen, prediction: null, viewIndex: -1 });
   },
 
   makeMove: (from, to, promotion) => {
-    const chess = get().chess;
+    const state = get();
+    // If viewing history, jump to latest before making a move
+    let chess = state.chess;
+    if (state.viewIndex !== -1) {
+      chess = new Chess();
+      const fullHistory = state.chess.history();
+      for (const m of fullHistory) chess.move(m);
+    }
+
     try {
       const result = chess.move({ from, to, promotion: promotion || "q" });
       if (result) {
         set({
+          chess,
           fen: chess.fen(),
-          moveHistory: [...get().moveHistory, result.lan],
+          moveHistory: [...state.moveHistory, result.lan],
           pgn: chess.pgn(),
           prediction: null,
+          viewIndex: -1,
         });
         return true;
       }
     } catch {
       // Invalid move
+    }
+    return false;
+  },
+
+  applyPredictedMove: (moveUci) => {
+    const chess = get().chess;
+    try {
+      const from = moveUci.slice(0, 2);
+      const to = moveUci.slice(2, 4);
+      const promotion = moveUci.length > 4 ? moveUci[4] : undefined;
+      const result = chess.move({ from, to, promotion });
+      if (result) {
+        set({
+          fen: chess.fen(),
+          moveHistory: [...get().moveHistory, result.lan],
+          pgn: chess.pgn(),
+          viewIndex: -1,
+        });
+        return true;
+      }
+    } catch {
+      // Invalid predicted move
     }
     return false;
   },
@@ -112,6 +148,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       moveHistory: history,
       pgn: chess.pgn(),
       prediction: null,
+      viewIndex: -1,
     });
   },
 
@@ -127,6 +164,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       positionEval: null,
       evalLoading: false,
       simulationSessionId: null,
+      viewIndex: -1,
     });
   },
 
@@ -149,15 +187,28 @@ export const useGameStore = create<GameState>((set, get) => ({
       pgn: chess.pgn(),
       moveHistory: chess.history(),
       prediction: null,
+      viewIndex: -1,
     });
   },
 
   goToMove: (moveIndex) => {
-    const chess = new Chess();
-    const history = get().chess.history();
-    for (let i = 0; i <= moveIndex && i < history.length; i++) {
-      chess.move(history[i]);
+    const fullHistory = get().chess.history();
+    const viewChess = new Chess();
+    for (let i = 0; i <= moveIndex && i < fullHistory.length; i++) {
+      viewChess.move(fullHistory[i]);
     }
-    set({ fen: chess.fen() });
+    set({
+      fen: viewChess.fen(),
+      viewIndex: moveIndex,
+      prediction: null,
+    });
+  },
+
+  goToLatest: () => {
+    const chess = get().chess;
+    set({
+      fen: chess.fen(),
+      viewIndex: -1,
+    });
   },
 }));
