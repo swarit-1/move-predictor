@@ -5,10 +5,6 @@ import { usePlayerStore } from "../../store/playerStore";
 import { startSimulation, makeSimulationMove } from "../../api/client";
 import type { Square } from "chess.js";
 
-/**
- * Simulation mode: play against a simulated opponent.
- * The user plays as White, the AI responds as Black (or vice versa).
- */
 export function SimulationBoard() {
   const { fen, simulationSessionId, setSimulationSession, setPrediction, setLoading } =
     useGameStore();
@@ -71,12 +67,11 @@ export function SimulationBoard() {
     [simulationSessionId, aiThinking, gameOver]
   );
 
-  // Build arrows for last AI move
   const customArrows: [Square, Square, string][] = [];
   if (lastAiMove) {
     const from = lastAiMove.slice(0, 2) as Square;
     const to = lastAiMove.slice(2, 4) as Square;
-    customArrows.push([from, to, "rgba(239, 68, 68, 0.6)"]);
+    customArrows.push([from, to, "rgba(239, 68, 68, 0.5)"]);
   }
 
   return (
@@ -84,32 +79,37 @@ export function SimulationBoard() {
       {!simulationSessionId ? (
         <button
           onClick={startGame}
-          className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-lg
-                     text-sm font-medium transition"
+          className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500
+                     rounded-xl text-sm font-semibold text-white transition-all duration-200
+                     shadow-lg shadow-purple-500/20"
         >
           Start Game vs {opponent?.username || "AI"}
         </button>
       ) : (
         <>
-          <Chessboard
-            position={simFen}
-            onPieceDrop={onPieceDrop}
-            customArrows={customArrows}
-            boardWidth={480}
-            customDarkSquareStyle={{ backgroundColor: "#779952" }}
-            customLightSquareStyle={{ backgroundColor: "#edeed1" }}
-          />
+          <div className="rounded-lg overflow-hidden shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]">
+            <Chessboard
+              position={simFen}
+              onPieceDrop={onPieceDrop}
+              customArrows={customArrows}
+              boardWidth={480}
+              customDarkSquareStyle={{ backgroundColor: "#779952" }}
+              customLightSquareStyle={{ backgroundColor: "#edeed1" }}
+            />
+          </div>
           {aiThinking && (
-            <p className="text-xs text-yellow-400 animate-pulse">
+            <p className="text-xs text-amber-400/70 animate-pulse font-light">
               Opponent is thinking...
             </p>
           )}
           {gameOver && (
-            <div className="text-center">
-              <p className="text-sm text-gray-300 mb-2">Game Over</p>
+            <div className="text-center space-y-3">
+              <p className="text-sm text-zinc-300 font-medium">Game Over</p>
               <button
                 onClick={startGame}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm"
+                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600
+                           hover:from-purple-500 hover:to-indigo-500
+                           rounded-xl text-sm font-semibold text-white transition-all duration-200"
               >
                 Play Again
               </button>

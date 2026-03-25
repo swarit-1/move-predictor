@@ -13,18 +13,18 @@ export function PlayerSearch() {
   };
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
-      <p className="text-xs font-medium text-gray-500">Select Opponent</p>
+    <div className="glass-card p-4 space-y-3">
+      <p className="text-xs font-medium text-zinc-500">Select Opponent</p>
 
       <div className="flex gap-2">
         {(["lichess", "chesscom"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setSource(s)}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            className={`flex-1 py-2 rounded-xl text-xs font-medium transition-all duration-200 ${
               source === s
-                ? "bg-gray-700 text-white ring-1 ring-gray-600"
-                : "bg-gray-800/50 text-gray-500 hover:text-gray-300"
+                ? "bg-white/[0.08] text-white ring-1 ring-white/[0.12]"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]"
             }`}
           >
             {s === "lichess" ? "Lichess" : "Chess.com"}
@@ -38,25 +38,25 @@ export function PlayerSearch() {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Enter username..."
-          className="flex-1 px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-sm
-                     text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none
-                     transition-colors"
+          className="flex-1 px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm
+                     text-white placeholder-zinc-600 focus:border-indigo-500/40 focus:outline-none
+                     focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         />
         <button
           onClick={handleSearch}
           disabled={opponentLoading || !username.trim()}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800
-                     disabled:text-gray-600 disabled:cursor-not-allowed rounded-lg text-sm
-                     font-medium text-white transition-colors"
+          className="px-5 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] disabled:bg-white/[0.02]
+                     disabled:text-zinc-700 disabled:cursor-not-allowed rounded-xl text-sm
+                     font-medium text-white transition-all duration-200"
         >
           {opponentLoading ? "..." : "Go"}
         </button>
       </div>
 
       {error && (
-        <div className="px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
-          <p className="text-xs text-red-400">{error}</p>
+        <div className="px-4 py-3 bg-red-500/[0.05] border border-red-500/[0.1] rounded-xl">
+          <p className="text-xs text-red-400/80 font-light">{error}</p>
         </div>
       )}
     </div>

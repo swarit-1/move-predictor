@@ -27,12 +27,12 @@ export function StyleSliders() {
   ];
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
+    <div className="glass-card p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-gray-500">Style Controls</p>
+        <p className="text-xs font-medium text-zinc-500">Style Controls</p>
         <button
           onClick={resetStyleOverrides}
-          className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors duration-200"
         >
           Reset
         </button>
@@ -41,8 +41,8 @@ export function StyleSliders() {
       {sliders.map(({ key, label, description }) => (
         <div key={key}>
           <div className="flex justify-between text-xs mb-1.5">
-            <span className="text-gray-400">{label}</span>
-            <span className="text-gray-300 font-mono text-[11px]">
+            <span className="text-zinc-400 font-medium">{label}</span>
+            <span className="text-zinc-300 font-mono text-[11px] font-semibold">
               {styleOverrides[key].toFixed(0)}
             </span>
           </div>
@@ -54,7 +54,7 @@ export function StyleSliders() {
             onChange={(e) => setStyleOverride(key, Number(e.target.value))}
             className="w-full"
           />
-          <p className="text-[10px] text-gray-600 mt-1">{description}</p>
+          <p className="text-[10px] text-zinc-600 mt-1 font-light">{description}</p>
         </div>
       ))}
     </div>

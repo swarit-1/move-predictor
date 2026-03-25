@@ -23,24 +23,33 @@ export function EvalBar({ height = 560 }: Props) {
     : 50;
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-center animate-fade-in">
       <div
-        className="w-4 rounded-sm overflow-hidden relative bg-[#3a3a3a]"
+        className="w-[14px] rounded-lg overflow-hidden relative"
         style={{ height }}
         title={`Eval: ${displayText}`}
       >
+        {/* Black side (top) */}
         <div
-          className="absolute top-0 left-0 right-0 bg-[#3a3a3a] transition-all duration-700 ease-out"
-          style={{ height: `${100 - whitePercent}%` }}
+          className="absolute top-0 left-0 right-0 transition-all duration-700 ease-out"
+          style={{
+            height: `${100 - whitePercent}%`,
+            background: "linear-gradient(180deg, #1a1a2e 0%, #2a2a3e 100%)",
+          }}
         />
+        {/* White side (bottom) */}
         <div
-          className="absolute bottom-0 left-0 right-0 bg-[#e8e8e8] transition-all duration-700 ease-out"
-          style={{ height: `${whitePercent}%` }}
+          className="absolute bottom-0 left-0 right-0 transition-all duration-700 ease-out"
+          style={{
+            height: `${whitePercent}%`,
+            background: "linear-gradient(180deg, #e8e8ec 0%, #d4d4d8 100%)",
+          }}
         />
-        <div className="absolute left-0 right-0 top-1/2 h-px bg-gray-500/40" />
+        {/* Center line */}
+        <div className="absolute left-0 right-0 top-1/2 h-px bg-zinc-500/30" />
       </div>
-      <span className={`text-[10px] mt-1.5 font-mono tabular-nums ${
-        evalLoading ? "text-gray-600 animate-pulse" : "text-gray-400"
+      <span className={`text-[10px] mt-2 font-mono font-semibold tabular-nums ${
+        evalLoading ? "text-zinc-600 animate-pulse" : "text-zinc-400"
       }`}>
         {displayText}
       </span>

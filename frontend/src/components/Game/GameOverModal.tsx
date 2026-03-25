@@ -13,7 +13,6 @@ export function GameOverModal({ onNewGame }: Props) {
 
   const isOver = chess.isGameOver();
 
-  // Reset dismissed when game resets
   useEffect(() => {
     if (!isOver) setDismissed(false);
   }, [isOver]);
@@ -22,67 +21,83 @@ export function GameOverModal({ onNewGame }: Props) {
 
   let result: string;
   let description: string;
-  let resultColor: string;
+  let resultGradient: string;
+  let glowColor: string;
 
   if (chess.isCheckmate()) {
     const loser = chess.turn();
     const playerWon = loser !== playerColor;
-    result = playerWon ? "You Win!" : "You Lose";
+    result = playerWon ? "Victory" : "Defeat";
     description = `Checkmate in ${Math.ceil(moveHistory.length / 2)} moves`;
-    resultColor = playerWon ? "text-green-400" : "text-red-400";
+    resultGradient = playerWon
+      ? "from-emerald-400 to-green-300"
+      : "from-red-400 to-rose-300";
+    glowColor = playerWon
+      ? "shadow-emerald-500/20"
+      : "shadow-red-500/20";
   } else if (chess.isStalemate()) {
     result = "Draw";
     description = "Stalemate — no legal moves";
-    resultColor = "text-gray-300";
+    resultGradient = "from-zinc-300 to-zinc-400";
+    glowColor = "shadow-zinc-500/10";
   } else if (chess.isThreefoldRepetition()) {
     result = "Draw";
     description = "Threefold repetition";
-    resultColor = "text-gray-300";
+    resultGradient = "from-zinc-300 to-zinc-400";
+    glowColor = "shadow-zinc-500/10";
   } else if (chess.isInsufficientMaterial()) {
     result = "Draw";
     description = "Insufficient material";
-    resultColor = "text-gray-300";
+    resultGradient = "from-zinc-300 to-zinc-400";
+    glowColor = "shadow-zinc-500/10";
   } else if (chess.isDraw()) {
     result = "Draw";
     description = "50-move rule";
-    resultColor = "text-gray-300";
+    resultGradient = "from-zinc-300 to-zinc-400";
+    glowColor = "shadow-zinc-500/10";
   } else {
     result = "Game Over";
     description = "";
-    resultColor = "text-gray-300";
+    resultGradient = "from-zinc-300 to-zinc-400";
+    glowColor = "shadow-zinc-500/10";
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-gray-900 border border-gray-700/60 rounded-2xl p-6 w-[340px] text-center space-y-4 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md animate-fade-in">
+      <div className={`glass-card p-7 w-[360px] text-center space-y-5 shadow-2xl ${glowColor} animate-slide-up`}>
         <div>
-          <h2 className={`text-2xl font-bold ${resultColor}`}>{result}</h2>
-          <p className="text-sm text-gray-400 mt-1">{description}</p>
+          <h2 className={`text-3xl font-bold bg-gradient-to-r ${resultGradient} bg-clip-text text-transparent`}>
+            {result}
+          </h2>
+          <p className="text-sm text-zinc-400 mt-1.5 font-light">{description}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <div className="bg-gray-800/50 rounded-lg p-3">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Moves</p>
-            <p className="text-lg font-mono font-bold text-gray-200">
+          <div className="bg-white/[0.03] border border-white/[0.04] rounded-xl p-3">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Moves</p>
+            <p className="text-xl font-mono font-bold text-zinc-200 mt-0.5">
               {Math.ceil(moveHistory.length / 2)}
             </p>
           </div>
-          <div className="bg-gray-800/50 rounded-lg p-3">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Half-moves</p>
-            <p className="text-lg font-mono font-bold text-gray-200">{moveHistory.length}</p>
+          <div className="bg-white/[0.03] border border-white/[0.04] rounded-xl p-3">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Half-moves</p>
+            <p className="text-xl font-mono font-bold text-zinc-200 mt-0.5">{moveHistory.length}</p>
           </div>
         </div>
 
-        <div className="flex gap-2 pt-2">
+        <div className="flex gap-2.5 pt-1">
           <button
             onClick={onNewGame}
-            className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white transition-colors"
+            className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400
+                       rounded-xl text-sm font-semibold text-white transition-all duration-200
+                       shadow-lg shadow-indigo-500/20"
           >
             New Game
           </button>
           <button
             onClick={() => setDismissed(true)}
-            className="flex-1 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-xl text-sm font-medium text-gray-300 transition-colors border border-gray-700/50"
+            className="flex-1 py-3 bg-white/[0.05] hover:bg-white/[0.08] rounded-xl text-sm font-medium
+                       text-zinc-300 transition-all duration-200 border border-white/[0.06]"
           >
             Review
           </button>

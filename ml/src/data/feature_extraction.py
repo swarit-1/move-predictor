@@ -8,7 +8,7 @@ import chess.pgn
 import numpy as np
 from io import StringIO
 
-from src.data.preprocessing import board_to_tensor, classify_game_phase
+from src.data.preprocessing import board_to_tensor, classify_game_phase, compute_position_complexity
 from src.models.move_encoding import encode_move
 
 
@@ -41,24 +41,36 @@ def extract_position_features(
     board_tensor = board_to_tensor(board)
 
     # Move history as indices (last N moves, padded with 0)
+    # Each move must be encoded with the board state AT THE TIME it was played,
+    # because encode_move mirrors squares for Black's perspective.
     from src.config import settings
     history_length = settings.history_length
     history_indices = []
 
-    # Replay the move history to encode moves with proper board context
-    temp_board = board.copy()
-    # We need the board states for encoding, so we work backwards
-    # Actually, we need to encode each historical move with its board state
-    # For simplicity, encode the UCI strings and map them
-    recent_moves = move_history[-history_length:]
-    for hist_move in recent_moves:
+    # Replay the full move history to reconstruct board states per move
+    replay_board = chess.Board()
+    encoded_all = []
+    for hist_move in move_history:
         try:
-            idx = encode_move(hist_move, temp_board)
-            history_indices.append(idx)
+            if hist_move in replay_board.legal_moves:
+                idx = encode_move(hist_move, replay_board)
+                encoded_all.append(idx)
+                replay_board.push(hist_move)
+            else:
+                replay_board.push(hist_move)
+                encoded_all.append(0)
         except (ValueError, IndexError):
-            history_indices.append(0)  # padding value
+            try:
+                replay_board.push(hist_move)
+            except Exception:
+                pass
+            encoded_all.append(0)
 
-    # Pad to history_length
+    # Take the last history_length encoded indices
+    recent = encoded_all[-history_length:]
+    history_indices = recent
+
+    # Pad to history_length (prepend zeros for short histories)
     while len(history_indices) < history_length:
         history_indices.insert(0, 0)
 
@@ -76,6 +88,9 @@ def extract_position_features(
 
     cpl = centipawn_loss if centipawn_loss is not None else 0.0
 
+    # Position complexity features
+    complexity = compute_position_complexity(board)
+
     return {
         "board_tensor": board_tensor,  # (18, 8, 8)
         "move_history": np.array(history_indices, dtype=np.int64),  # (T,)
@@ -83,6 +98,12 @@ def extract_position_features(
         "player_rating": player_rating / 3000.0,  # normalize
         "game_phase": game_phase,
         "move_number": min(board.fullmove_number / 100.0, 1.0),
+        "complexity": np.array([
+            complexity["mobility"],
+            complexity["piece_tension"],
+            complexity["king_exposure"],
+            complexity["material_imbalance"],
+        ], dtype=np.float32),
         # Labels
         "move_index": move_index,
         "eval_score": eval_normalized,

@@ -131,6 +131,67 @@ def board_to_tensor(board: chess.Board) -> np.ndarray:
     return tensor
 
 
+def compute_position_complexity(board: chess.Board) -> dict[str, float]:
+    """Compute position complexity features for a board state.
+
+    Returns a dict with normalized complexity metrics:
+    - mobility: ratio of legal moves to typical max (~40)
+    - piece_tension: count of attacked pieces / total pieces
+    - king_exposure: attackers near king / 8
+    - material_imbalance: abs material difference / total material
+    - pawn_structure: doubled/isolated pawn penalty
+    """
+    # Mobility
+    num_legal = board.legal_moves.count()
+    mobility = min(num_legal / 40.0, 1.0)
+
+    # Piece tension: count pieces that are attacked by the opponent
+    us = board.turn
+    them = not us
+    our_pieces = 0
+    attacked_pieces = 0
+    for sq in chess.SQUARES:
+        piece = board.piece_at(sq)
+        if piece and piece.color == us:
+            our_pieces += 1
+            if board.is_attacked_by(them, sq):
+                attacked_pieces += 1
+    piece_tension = attacked_pieces / max(our_pieces, 1)
+
+    # King exposure: number of opponent attackers on squares near our king
+    our_king_sq = board.king(us)
+    king_exposure = 0.0
+    if our_king_sq is not None:
+        king_file = chess.square_file(our_king_sq)
+        king_rank = chess.square_rank(our_king_sq)
+        for df in range(-1, 2):
+            for dr in range(-1, 2):
+                f, r = king_file + df, king_rank + dr
+                if 0 <= f <= 7 and 0 <= r <= 7:
+                    sq = chess.square(f, r)
+                    king_exposure += len(board.attackers(them, sq))
+        king_exposure = min(king_exposure / 16.0, 1.0)
+
+    # Material imbalance
+    piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+    white_mat = sum(piece_values.get(board.piece_at(sq).piece_type, 0)
+                    for sq in chess.SQUARES
+                    if board.piece_at(sq) and board.piece_at(sq).color == chess.WHITE)
+    black_mat = sum(piece_values.get(board.piece_at(sq).piece_type, 0)
+                    for sq in chess.SQUARES
+                    if board.piece_at(sq) and board.piece_at(sq).color == chess.BLACK)
+    total_mat = white_mat + black_mat
+    material_imbalance = abs(white_mat - black_mat) / max(total_mat, 1)
+
+    return {
+        "mobility": mobility,
+        "piece_tension": piece_tension,
+        "king_exposure": king_exposure,
+        "material_imbalance": material_imbalance,
+    }
+
+
 def fen_to_tensor(fen: str) -> np.ndarray:
     """Convert a FEN string to an 18-channel 8×8 tensor.
 

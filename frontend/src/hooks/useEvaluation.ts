@@ -12,6 +12,7 @@ export function useEvaluation() {
   const moveHistory = useGameStore((s) => s.moveHistory);
   const setPositionEval = useGameStore((s) => s.setPositionEval);
   const setEvalLoading = useGameStore((s) => s.setEvalLoading);
+  const pushEvalHistory = useGameStore((s) => s.pushEvalHistory);
 
   const prevFenRef = useRef(fen);
   const abortRef = useRef<AbortController | null>(null);
@@ -33,9 +34,13 @@ export function useEvaluation() {
       if (response.success && response.data) {
         const topMove = response.data.top_moves?.[0];
         if (topMove && topMove.cp !== null && topMove.cp !== undefined) {
-          setPositionEval({ cp: topMove.cp, mate: topMove.mate ?? null });
+          const evalEntry = { cp: topMove.cp, mate: topMove.mate ?? null };
+          setPositionEval(evalEntry);
+          pushEvalHistory({ moveNumber: moveHistory.length, ...evalEntry });
         } else if (topMove?.mate !== null && topMove?.mate !== undefined) {
-          setPositionEval({ cp: topMove.mate > 0 ? 10000 : -10000, mate: topMove.mate });
+          const evalEntry = { cp: topMove.mate > 0 ? 10000 : -10000, mate: topMove.mate };
+          setPositionEval(evalEntry);
+          pushEvalHistory({ moveNumber: moveHistory.length, ...evalEntry });
         }
       }
     } catch {

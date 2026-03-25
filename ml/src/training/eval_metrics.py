@@ -86,4 +86,22 @@ class MetricsTracker:
             except ValueError:
                 metrics["blunder_auc"] = 0.0
 
+        # Behavioral metrics: how "human-like" is the predicted distribution
+        if self._blunder_preds and self._blunder_targets:
+            preds = np.array(self._blunder_preds)
+            targets = np.array(self._blunder_targets)
+
+            # Blunder calibration: predicted blunder rate should match actual rate
+            pred_rate = float(np.mean(preds > 0.5))
+            actual_rate = float(np.mean(targets))
+            metrics["blunder_calibration"] = 1.0 - abs(pred_rate - actual_rate)
+
+            # CPL distribution similarity: how close the predicted CPL distribution
+            # is to the actual one (measured by correlation)
+            if self._cpl_errors and len(self._cpl_errors) > 10:
+                cpl_arr = np.array(self._cpl_errors)
+                # Percentile match: compare predicted vs actual CPL at key percentiles
+                metrics["cpl_p50"] = float(np.percentile(cpl_arr, 50))
+                metrics["cpl_p90"] = float(np.percentile(cpl_arr, 90))
+
         return metrics

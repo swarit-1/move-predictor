@@ -35,21 +35,23 @@ export function MoveDistribution({ topMoves, engineTopMoves }: Props) {
 
   return (
     <div>
-      <p className="text-[10px] text-gray-500 mb-1">Top Moves</p>
+      <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-1.5">
+        Top Moves
+      </p>
       <ResponsiveContainer width="100%" height={100}>
         <BarChart data={data} layout="vertical" margin={{ left: 32, right: 4, top: 0, bottom: 0 }}>
           <XAxis
             type="number"
             domain={[0, "dataMax"]}
             tickFormatter={(v) => `${v}%`}
-            tick={{ fontSize: 9, fill: "#4b5563" }}
+            tick={{ fontSize: 9, fill: "#52525b" }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
             type="category"
             dataKey="move"
-            tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "ui-monospace, monospace" }}
+            tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "JetBrains Mono, monospace" }}
             width={32}
             axisLine={false}
             tickLine={false}
@@ -57,15 +59,16 @@ export function MoveDistribution({ topMoves, engineTopMoves }: Props) {
           <Tooltip
             formatter={(value: number) => [`${value}%`, "Prob"]}
             contentStyle={{
-              backgroundColor: "#111827",
-              border: "1px solid #1f2937",
-              borderRadius: "8px",
+              backgroundColor: "rgba(10, 10, 15, 0.95)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "10px",
               fontSize: "11px",
-              color: "#d1d5db",
+              color: "#d4d4d8",
               padding: "6px 10px",
+              backdropFilter: "blur(8px)",
             }}
           />
-          <Bar dataKey="probability" radius={[0, 3, 3, 0]} barSize={14}>
+          <Bar dataKey="probability" radius={[0, 4, 4, 0]} barSize={14}>
             {data.map((entry, index) => (
               <Cell
                 key={`cell-${index}`}
@@ -73,10 +76,10 @@ export function MoveDistribution({ topMoves, engineTopMoves }: Props) {
                   index === 0
                     ? "#22c55e"
                     : entry.engineRank === 1
-                    ? "#3b82f6"
-                    : "#374151"
+                    ? "#6366f1"
+                    : "#27272a"
                 }
-                fillOpacity={index === 0 ? 0.6 : 0.4}
+                fillOpacity={index === 0 ? 0.55 : 0.4}
               />
             ))}
           </Bar>

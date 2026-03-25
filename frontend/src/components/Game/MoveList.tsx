@@ -30,35 +30,35 @@ export function MoveList() {
   }, [moveHistory.length]);
 
   return (
-    <div className="bg-gray-900/80 border border-gray-800/60 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">
+    <div className="glass-card p-4">
+      <div className="flex items-center justify-between mb-2.5">
+        <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-[0.12em]">
           Moves
         </p>
         {viewIndex !== -1 && (
           <button
             onClick={goToLatest}
-            className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+            className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors duration-200 font-medium"
           >
             Latest
           </button>
         )}
       </div>
       {pairs.length === 0 ? (
-        <p className="text-xs text-gray-600">No moves yet.</p>
+        <p className="text-xs text-zinc-600 font-light">No moves yet.</p>
       ) : (
-        <div ref={scrollRef} className="max-h-52 overflow-y-auto space-y-px pr-1">
+        <div ref={scrollRef} className="max-h-56 overflow-y-auto space-y-px pr-1">
           {pairs.map((pair) => (
             <div key={pair.number} className="flex text-xs font-mono items-center">
-              <span className="w-7 text-gray-600 tabular-nums text-right pr-1.5 flex-shrink-0">
+              <span className="w-7 text-zinc-600 tabular-nums text-right pr-2 flex-shrink-0">
                 {pair.number}.
               </span>
               <button
                 onClick={() => goToMove(pair.whiteIdx)}
-                className={`w-16 text-left px-1.5 py-[3px] rounded transition-colors ${
+                className={`w-16 text-left px-2 py-[3px] rounded-md transition-all duration-150 ${
                   currentIndex === pair.whiteIdx
-                    ? "bg-blue-500/15 text-blue-300"
-                    : "text-gray-300 hover:bg-gray-800/80 hover:text-white"
+                    ? "bg-indigo-500/[0.12] text-indigo-300 ring-1 ring-indigo-500/20"
+                    : "text-zinc-300 hover:bg-white/[0.04] hover:text-white"
                 }`}
               >
                 {pair.white}
@@ -66,10 +66,10 @@ export function MoveList() {
               {pair.black && (
                 <button
                   onClick={() => goToMove(pair.blackIdx)}
-                  className={`w-16 text-left px-1.5 py-[3px] rounded transition-colors ${
+                  className={`w-16 text-left px-2 py-[3px] rounded-md transition-all duration-150 ${
                     currentIndex === pair.blackIdx
-                      ? "bg-blue-500/15 text-blue-300"
-                      : "text-gray-400 hover:bg-gray-800/80 hover:text-white"
+                      ? "bg-indigo-500/[0.12] text-indigo-300 ring-1 ring-indigo-500/20"
+                      : "text-zinc-400 hover:bg-white/[0.04] hover:text-white"
                   }`}
                 >
                   {pair.black}

@@ -8,14 +8,16 @@ export function Explainability() {
   const { explanation } = prediction;
 
   return (
-    <div className="bg-gray-900/80 border border-gray-800/60 rounded-xl p-4 space-y-2">
-      <div className="flex items-start gap-2 text-xs">
+    <div className="glass-card p-4 space-y-2 animate-fade-in">
+      <div className="flex items-start gap-2.5 text-xs">
         <span
-          className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-            explanation.is_deviation ? "bg-amber-400" : "bg-green-400"
+          className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+            explanation.is_deviation
+              ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.3)]"
+              : "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.3)]"
           }`}
         />
-        <p className="text-gray-400 leading-relaxed">
+        <p className="text-zinc-400 leading-relaxed font-light">
           {explanation.is_deviation
             ? explanation.deviation_reason
             : "Matches the engine's best move."}
@@ -23,9 +25,9 @@ export function Explainability() {
       </div>
 
       {explanation.factors.length > 1 && (
-        <div className="space-y-1 pl-3.5">
+        <div className="space-y-1 pl-4.5">
           {explanation.factors.slice(1).map((factor, i) => (
-            <p key={i} className="text-[11px] text-gray-500/80 leading-relaxed">
+            <p key={i} className="text-[11px] text-zinc-600 leading-relaxed font-light pl-[18px]">
               {factor}
             </p>
           ))}

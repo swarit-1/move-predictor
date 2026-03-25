@@ -26,6 +26,12 @@ export interface PositionEval {
   mate: number | null;
 }
 
+export interface EvalHistoryEntry {
+  moveNumber: number;
+  cp: number;
+  mate: number | null;
+}
+
 interface GameState {
   chess: Chess;
   fen: string;
@@ -39,6 +45,7 @@ interface GameState {
   positionEval: PositionEval | null;
   evalLoading: boolean;
   showEvalBar: boolean;
+  evalHistory: EvalHistoryEntry[];
 
   playerColor: "w" | "b";
 
@@ -59,6 +66,7 @@ interface GameState {
   setPositionEval: (eval_: PositionEval | null) => void;
   setEvalLoading: (loading: boolean) => void;
   setShowEvalBar: (show: boolean) => void;
+  pushEvalHistory: (entry: EvalHistoryEntry) => void;
   setPlayerColor: (color: "w" | "b") => void;
   setMode: (mode: "analyze" | "simulate") => void;
   setSimulationSession: (id: string | null) => void;
@@ -78,6 +86,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   positionEval: null,
   evalLoading: false,
   showEvalBar: true,
+  evalHistory: [],
   playerColor: "w",
   mode: "analyze",
   simulationSessionId: null,
@@ -163,6 +172,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       predictionError: null,
       positionEval: null,
       evalLoading: false,
+      evalHistory: [],
       simulationSessionId: null,
       viewIndex: -1,
     });
@@ -174,6 +184,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setPositionEval: (eval_) => set({ positionEval: eval_ }),
   setEvalLoading: (loading) => set({ evalLoading: loading }),
   setShowEvalBar: (show) => set({ showEvalBar: show }),
+  pushEvalHistory: (entry) => set((s) => ({ evalHistory: [...s.evalHistory, entry] })),
   setPlayerColor: (color) => set({ playerColor: color }),
   setMode: (mode) => set({ mode }),
   setSimulationSession: (id) => set({ simulationSessionId: id }),
