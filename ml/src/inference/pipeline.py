@@ -3,8 +3,9 @@
 Orchestrates the board encoder, sequence encoder, player embedding,
 and skill-aware sampler into a single inference call.
 
-When no trained checkpoint is available, falls back to Stockfish-based
-prediction with skill-level calibration.
+When no trained checkpoint is available, uses the Lichess Opening Explorer
+for real human move distributions, falling back to Stockfish-based
+prediction with skill-level calibration for positions not in the explorer DB.
 """
 
 import logging
@@ -59,20 +60,44 @@ class PredictionPipeline:
         else:
             self.has_checkpoint = False
             logger.info(
-                "No checkpoint loaded — using Stockfish-based fallback for predictions"
+                "No checkpoint loaded — using explorer + Stockfish fallback"
             )
 
         self.model = self.model.to(self.device)
         self.model.eval()
         logger.info(f"Model running on device: {self.device}")
 
+    def load_model_for_rating(self, rating: float) -> None:
+        """Load the best available model checkpoint for a given rating."""
+        brackets = [
+            (400, 800), (800, 1000), (1000, 1200), (1200, 1400),
+            (1400, 1600), (1600, 1800), (1800, 2000), (2000, 2200), (2200, 2500),
+        ]
+
+        best_bracket = min(brackets, key=lambda b: abs((b[0] + b[1]) / 2 - rating))
+        checkpoint_path = f"data/checkpoints/{best_bracket[0]}_{best_bracket[1]}/phase1_best.pt"
+
+        if Path(checkpoint_path).exists():
+            self.load_model(checkpoint_path)
+            logger.info(
+                "Loaded %d-%d bracket model for rating %s",
+                best_bracket[0], best_bracket[1], rating,
+            )
+        else:
+            logger.info(
+                "No bracket checkpoint for rating %s, using explorer + fallback", rating
+            )
+
     def set_opening_book(self, player_key: str, book: OpeningBook) -> None:
         """Register an opening book for a player."""
         self.opening_books[player_key] = book
-        logger.info(f"Set opening book for {player_key}: {book.total_games} games, {book.size} nodes")
+        logger.info(
+            "Set opening book for %s: %d games, %d nodes",
+            player_key, book.total_games, book.size,
+        )
 
     @torch.no_grad()
-    def predict(
+    async def predict(
         self,
         fen: str,
         move_history: list[str] | None = None,
@@ -101,8 +126,9 @@ class PredictionPipeline:
                 player_rating, style, engine_top_moves, opening_book_probs,
             )
         else:
-            return self._predict_with_stockfish_fallback(
-                board, player_rating, style, engine_top_moves, opening_book_probs,
+            return await self._predict_with_data(
+                board, player_rating, style, engine_top_moves,
+                opening_book_probs, player_key,
             )
 
     def _predict_with_model(
@@ -158,28 +184,133 @@ class PredictionPipeline:
             opening_book_probs=opening_book_probs,
         )
 
-    def _predict_with_stockfish_fallback(
+    async def _predict_with_data(
         self,
         board: chess.Board,
         player_rating: float,
         style: StyleOverrides | None,
         engine_top_moves: list[dict] | None,
         opening_book_probs: dict[str, float] | None = None,
+        player_key: str | None = None,
     ) -> SampledMove:
-        """Use Stockfish analysis to build a realistic policy distribution.
+        """Predict using real human data when available, falling back to Stockfish.
 
-        Creates logits from Stockfish's top moves, weighted by centipawn
-        evaluation, then feeds through the existing skill-aware sampler
-        so the rating/style controls still work.
+        Data source priority:
+        1. Specific player's Lichess explorer stats (best)
+        2. Player's opening book from fetched games
+        3. Aggregate human stats at this rating level from Lichess explorer
+        4. Stockfish + blind spot biases (for obscure positions)
         """
-        # Build logits from engine top moves if available
+        from src.data.lichess_explorer import (
+            get_explorer_moves,
+            get_player_explorer_moves,
+            explorer_moves_to_logits,
+        )
+
+        # Step 1: Try Lichess Opening Explorer for real human move statistics
+        explorer_moves = await get_explorer_moves(board.fen(), player_rating)
+
+        # Step 2: If this is a specific Lichess player, try their personal stats
+        player_explorer_moves: list[dict] = []
+        if player_key and player_key.startswith("lichess:"):
+            username = player_key.split(":", 1)[1]
+            color = "white" if board.turn == chess.WHITE else "black"
+            player_explorer_moves = await get_player_explorer_moves(
+                board.fen(), username, color
+            )
+
+        # Step 3: Build logits from the best available data source
+        if player_explorer_moves and len(player_explorer_moves) >= 2:
+            logits = explorer_moves_to_logits(player_explorer_moves, board)
+            source = "player_explorer"
+        elif opening_book_probs and len(opening_book_probs) >= 2:
+            logits = self._book_probs_to_logits(opening_book_probs, board)
+            source = "opening_book"
+        elif explorer_moves and len(explorer_moves) >= 2:
+            logits = explorer_moves_to_logits(explorer_moves, board)
+            source = "rating_explorer"
+        else:
+            logits = self._build_stockfish_logits(board, engine_top_moves)
+            source = "stockfish_fallback"
+
+        logger.debug("Prediction source: %s for FEN: %s", source, board.fen()[:40])
+
+        # Step 4: Estimate error metrics from rating
+        estimated_cpl = max(0.0, 3.0 - player_rating * 0.0012)
+        estimated_blunder = max(0.02, 0.35 - player_rating * 0.00012)
+
+        if style:
+            estimated_cpl *= (0.5 + style.blunder_frequency / 100.0)
+            estimated_blunder *= (0.5 + style.blunder_frequency / 100.0)
+
+        # Step 5: For explorer-sourced data, reduce temperature (already human-like).
+        # For stockfish fallback, apply full blind spot biases.
+        if source in ("player_explorer", "opening_book"):
+            # Explorer data is already a realistic distribution — use lighter sampling
+            return sample_move(
+                policy_logits=logits,
+                board=board,
+                predicted_cpl=estimated_cpl * 0.6,
+                blunder_prob=estimated_blunder * 0.6,
+                player_rating=player_rating,
+                style=style,
+                engine_top_moves=engine_top_moves,
+                opening_book_probs=None,  # Already baked in
+                apply_blind_spots=False,  # Data is already human-like
+            )
+        else:
+            # Stockfish fallback or rating explorer — apply blind spots
+            return sample_move(
+                policy_logits=logits,
+                board=board,
+                predicted_cpl=estimated_cpl,
+                blunder_prob=estimated_blunder,
+                player_rating=player_rating,
+                style=style,
+                engine_top_moves=engine_top_moves,
+                opening_book_probs=opening_book_probs,
+            )
+
+    def _book_probs_to_logits(
+        self,
+        book_probs: dict[str, float],
+        board: chess.Board,
+    ) -> torch.Tensor:
+        """Convert opening book probabilities to logits."""
+        import math
+        logits = torch.full((NUM_MOVES,), float("-inf"))
+
+        for move_uci, prob in book_probs.items():
+            try:
+                move = chess.Move.from_uci(move_uci)
+                if move in board.legal_moves:
+                    idx = encode_move(move, board)
+                    logits[idx] = math.log(prob + 1e-8) + 5.0
+            except (ValueError, IndexError):
+                continue
+
+        # Fill remaining legal moves with small logit
+        for move in board.legal_moves:
+            try:
+                idx = encode_move(move, board)
+                if logits[idx] == float("-inf"):
+                    logits[idx] = -6.0
+            except (ValueError, IndexError):
+                continue
+
+        return logits
+
+    def _build_stockfish_logits(
+        self,
+        board: chess.Board,
+        engine_top_moves: list[dict] | None,
+    ) -> torch.Tensor:
+        """Build logits from Stockfish analysis for positions not in explorer DB."""
         logits = torch.full((NUM_MOVES,), float("-inf"))
 
         has_engine_data = engine_top_moves and len(engine_top_moves) > 0
 
         if has_engine_data:
-            # Use Stockfish evaluation to build a strong-player distribution.
-            # Top engine moves get high logits proportional to their eval.
             best_cp = engine_top_moves[0].get("cp", 0) or 0
 
             for i, em in enumerate(engine_top_moves):
@@ -189,26 +320,18 @@ class PredictionPipeline:
                 try:
                     move = chess.Move.from_uci(uci)
                     idx = encode_move(move, board)
-                    # Rank-based logit: top move gets highest, decays
                     cp = em.get("cp", best_cp) or best_cp
-                    cp_diff = (cp - best_cp) / 100.0  # negative for worse moves
-                    # Strong base logit that decays with rank and eval loss
+                    cp_diff = (cp - best_cp) / 100.0
                     logits[idx] = 5.0 - i * 0.8 + cp_diff * 0.5
                 except (ValueError, IndexError):
                     continue
 
-            # Non-engine moves get piece-type-weighted logits.
-            # The key insight: -1.0 was WAY too close to engine moves (5.0).
-            # With temperature ~0.8, queen/rook shuffles each got ~1-2%,
-            # and with 30+ such moves, random shuffling dominated.
-            # Now: queen/rook shuffles at -4.0 are effectively impossible
-            # unless temperature is very high, while natural moves (pawn
-            # pushes, knight development) remain plausible alternatives.
+            # Non-engine moves: piece-type-weighted logits
             for move in board.legal_moves:
                 try:
                     idx = encode_move(move, board)
                     if logits[idx] != float("-inf"):
-                        continue  # Already assigned as engine move
+                        continue
 
                     piece = board.piece_at(move.from_square)
                     base_logit = -4.0
@@ -216,65 +339,40 @@ class PredictionPipeline:
                     if piece:
                         pt = piece.piece_type
                         if pt == chess.PAWN:
-                            base_logit = -1.5
-                            # Central pawn pushes are more natural
                             to_file = chess.square_file(move.to_square)
-                            if to_file in (2, 3, 4, 5):  # c-f files
-                                base_logit = -1.0
+                            base_logit = -1.0 if to_file in (2, 3, 4, 5) else -1.5
                         elif pt == chess.KNIGHT:
-                            base_logit = -2.0
                             to_rank = chess.square_rank(move.to_square)
                             to_file = chess.square_file(move.to_square)
                             if 2 <= to_file <= 5 and 2 <= to_rank <= 5:
                                 base_logit = -1.5
+                            else:
+                                base_logit = -2.5
                         elif pt == chess.BISHOP:
-                            base_logit = -2.0
+                            base_logit = -2.5
                         elif pt == chess.ROOK:
-                            # Rook shuffles are the #2 tell of random play
-                            base_logit = -3.5
-                        elif pt == chess.QUEEN:
-                            # Random queen moves are the #1 tell
                             base_logit = -4.0
+                        elif pt == chess.QUEEN:
+                            base_logit = -5.0
                         elif pt == chess.KING:
                             if board.is_castling(move):
-                                base_logit = -0.5  # Castling is natural
+                                base_logit = -0.5
                             else:
-                                base_logit = -4.5
+                                base_logit = -5.0
 
                     logits[idx] = base_logit + random.gauss(0, 0.15)
                 except (ValueError, IndexError):
                     continue
         else:
-            # No Stockfish data — give all legal moves equal logits
-            # (sampler temperature will still create rating-appropriate play)
+            # No Stockfish data — equal logits with small noise
             for move in board.legal_moves:
                 try:
                     idx = encode_move(move, board)
-                    # Add small random noise so moves aren't identical
                     logits[idx] = 0.0 + random.gauss(0, 0.2)
                 except (ValueError, IndexError):
                     continue
 
-        # Estimate CPL and blunder probability from rating.
-        # The sampler's compute_temperature expects small CPL values (model scale, ~0-5),
-        # not real centipawn values. Keep these on the same scale the model would output.
-        estimated_cpl = max(0.0, 3.0 - player_rating * 0.0012)  # ~1.8 at 1000, ~0.6 at 2000
-        estimated_blunder = max(0.02, 0.35 - player_rating * 0.00012)  # ~23% at 1000, ~11% at 2000
-
-        if style:
-            estimated_cpl *= (0.5 + style.blunder_frequency / 100.0)
-            estimated_blunder *= (0.5 + style.blunder_frequency / 100.0)
-
-        return sample_move(
-            policy_logits=logits,
-            board=board,
-            predicted_cpl=estimated_cpl,
-            blunder_prob=estimated_blunder,
-            player_rating=player_rating,
-            style=style,
-            engine_top_moves=engine_top_moves,
-            opening_book_probs=opening_book_probs,
-        )
+        return logits
 
     def _encode_history(
         self,

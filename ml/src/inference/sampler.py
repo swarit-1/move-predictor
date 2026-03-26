@@ -151,6 +151,7 @@ def sample_move(
     style: StyleOverrides | None = None,
     engine_top_moves: list[dict] | None = None,
     opening_book_probs: dict[str, float] | None = None,
+    apply_blind_spots: bool = True,
 ) -> SampledMove:
     """Sample a move using blind spot biases + temperature scaling.
 
@@ -197,11 +198,12 @@ def sample_move(
     logits = apply_style_bias(policy_logits, board, style)
 
     # Apply blind spot biases — structured human error modeling
-    blind_spot_config = BlindSpotConfig.from_rating(player_rating)
-    bs_result = compute_blind_spot_biases(
-        logits, board, blind_spot_config, engine_top_moves,
-    )
-    logits = bs_result.modified_logits
+    if apply_blind_spots:
+        blind_spot_config = BlindSpotConfig.from_rating(player_rating)
+        bs_result = compute_blind_spot_biases(
+            logits, board, blind_spot_config, engine_top_moves,
+        )
+        logits = bs_result.modified_logits
 
     # Mask illegal moves
     logits[~legal_mask] = float("-inf")

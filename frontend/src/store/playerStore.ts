@@ -15,6 +15,8 @@ export interface PlayerProfile {
   rating: number;
   numGames: number;
   styleSummary: StyleSummary | null;
+  playerKey?: string;  // e.g. "lichess:DrNykterstein"
+  openingBookSize?: number;
 }
 
 export interface StyleOverrides {

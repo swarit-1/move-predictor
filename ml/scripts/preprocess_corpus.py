@@ -26,10 +26,15 @@ def preprocess_file(
     use_stockfish: bool = False,
     stockfish_depth: int = 12,
     max_games: int | None = None,
-) -> list[dict]:
-    """Preprocess a single PGN file into feature dicts."""
-    all_positions = []
+) -> list[list[dict]]:
+    """Preprocess a single PGN file into per-game position lists.
+
+    Returns a list of games, where each game is a list of feature dicts.
+    Grouping by game prevents data leakage when splitting train/val.
+    """
+    game_positions: list[list[dict]] = []
     games_processed = 0
+    total_positions = 0
 
     print(f"Processing {filepath}...")
 
@@ -40,7 +45,8 @@ def preprocess_file(
         metadata = game_metadata(game)
         moves = game_to_moves(game)
         board = game.board()
-        move_history = []
+        move_history: list = []
+        positions: list[dict] = []
 
         for move in moves:
             try:
@@ -52,19 +58,23 @@ def preprocess_file(
                     if board.turn == chess.WHITE
                     else metadata.get("black_elo") or 1500,
                 )
-                all_positions.append(features)
+                positions.append(features)
             except (ValueError, IndexError):
                 pass
 
             move_history.append(move)
             board.push(move)
 
+        if positions:
+            game_positions.append(positions)
+            total_positions += len(positions)
+
         games_processed += 1
         if games_processed % 100 == 0:
-            print(f"  Processed {games_processed} games, {len(all_positions)} positions")
+            print(f"  Processed {games_processed} games, {total_positions} positions")
 
-    print(f"  Total: {games_processed} games, {len(all_positions)} positions from {filepath}")
-    return all_positions
+    print(f"  Total: {games_processed} games, {total_positions} positions from {filepath}")
+    return game_positions
 
 
 def main():
@@ -78,39 +88,52 @@ def main():
     args = parser.parse_args()
 
     input_path = Path(args.input)
-    all_positions = []
+    all_games: list[list[dict]] = []
 
     if input_path.is_file():
-        all_positions = preprocess_file(
+        all_games = preprocess_file(
             str(input_path),
             use_stockfish=args.stockfish,
             max_games=args.max_games,
         )
     elif input_path.is_dir():
         for pgn_file in sorted(input_path.glob("*.pgn")):
-            positions = preprocess_file(
+            games = preprocess_file(
                 str(pgn_file),
                 use_stockfish=args.stockfish,
                 max_games=args.max_games,
             )
-            all_positions.extend(positions)
+            all_games.extend(games)
     else:
         print(f"Error: {input_path} is not a file or directory")
         sys.exit(1)
 
-    if not all_positions:
+    if not all_games:
         print("No positions extracted!")
         sys.exit(1)
 
-    # Split into train/val
+    # Split by GAME (not by position) to prevent data leakage
     import random
-    random.shuffle(all_positions)
-    val_size = int(len(all_positions) * args.val_split)
-    val_data = all_positions[:val_size]
-    train_data = all_positions[val_size:]
+    random.shuffle(all_games)
+    val_count = int(len(all_games) * args.val_split)
+    val_games = all_games[:val_count]
+    train_games = all_games[val_count:]
+
+    # Flatten games into position lists
+    train_data = [pos for game in train_games for pos in game]
+    val_data = [pos for game in val_games for pos in game]
+
+    # Shuffle positions within each split
+    random.shuffle(train_data)
+    random.shuffle(val_data)
+
+    total = len(train_data) + len(val_data)
+    print(f"\nSplit: {len(train_games)} train games, {len(val_games)} val games")
+    print(f"       {len(train_data)} train positions, {len(val_data)} val positions")
 
     # Save
     output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     save_to_hdf5(train_data, str(output_path))
     print(f"Saved {len(train_data)} training positions to {output_path}")
 

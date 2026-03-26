@@ -73,9 +73,9 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
     except Exception:
         pass  # Stockfish unavailable — proceed without engine comparison
 
-    # Run prediction
+    # Run prediction (async — queries Lichess explorer when no checkpoint)
     try:
-        result = prediction_pipeline.predict(
+        result = await prediction_pipeline.predict(
             fen=request.fen,
             move_history=request.move_history,
             player_id=request.player_id,

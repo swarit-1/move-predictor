@@ -16,10 +16,11 @@ export function usePrediction() {
 
     setLoading(true);
     try {
-      // Build player_key for opening book lookup (only for real player profiles)
-      const playerKey = opponent && opponent.source !== "rating" && opponent.source !== "style"
-        ? `${opponent.source}:${opponent.username}`.toLowerCase()
-        : undefined;
+      // Use playerKey from profile (set by ML service), or build from source:username
+      const playerKey = opponent?.playerKey
+        || (opponent && opponent.source !== "rating" && opponent.source !== "style"
+          ? `${opponent.source}:${opponent.username}`.toLowerCase()
+          : undefined);
 
       const response = await predictMove({
         fen,

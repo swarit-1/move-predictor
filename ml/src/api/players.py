@@ -28,6 +28,9 @@ class PlayerProfile(BaseModel):
     num_games: int
     stats: dict
     style_summary: dict
+    player_key: str | None = None
+    opening_book_size: int = 0
+    preparation_steps: list[str] = []
 
 
 @router.post("/player/build-profile")
@@ -99,6 +102,13 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
         num_games=stats.num_games,
         stats={"vector": stats.to_vector().tolist()},
         style_summary=style_summary,
+        player_key=player_key,
+        opening_book_size=book.size,
+        preparation_steps=[
+            "fetched_games",
+            "built_opening_book",
+            "computed_stats",
+        ],
     )
 
 

@@ -39,6 +39,7 @@ class BlindSpotConfig:
     piece_preference: float = 0.0
     king_safety_neglect: float = 0.0
     long_range_blindness: float = 0.0
+    king_attack_neglect: float = 0.0
 
     @classmethod
     def from_rating(cls, rating: float) -> "BlindSpotConfig":
@@ -57,6 +58,7 @@ class BlindSpotConfig:
             piece_preference=weakness * 0.3,
             king_safety_neglect=weakness * 0.5,
             long_range_blindness=weakness * 0.7,
+            king_attack_neglect=weakness * 0.6,
         )
 
 
@@ -125,6 +127,14 @@ def compute_blind_spot_biases(
         modified = modified + delta
         if fired:
             active.append("long_range_blindness")
+
+    if config.king_attack_neglect > 0.05:
+        delta, fired = _apply_king_attack_neglect(
+            modified, board, config.king_attack_neglect,
+        )
+        modified = modified + delta
+        if fired:
+            active.append("king_attack_neglect")
 
     return BlindSpotResult(modified_logits=modified, active_biases=active)
 
@@ -386,6 +396,68 @@ def _apply_long_range_blindness(
             if idx is not None:
                 penalty = -strength * (0.5 + distance * 0.3)
                 delta[idx] += penalty
+                fired = True
+
+    return delta, fired
+
+
+def _apply_king_attack_neglect(
+    logits: torch.Tensor,
+    board: chess.Board,
+    strength: float,
+) -> tuple[torch.Tensor, bool]:
+    """Penalize moves that retreat from the enemy king when we have pressure.
+
+    Even low-rated players understand that when the enemy king is exposed,
+    you should keep attacking. Moving a piece to the other side of the
+    board (like Bb5 when the king is under fire) is unrealistic.
+    """
+    opp_king = board.king(not board.turn)
+    if opp_king is None:
+        return torch.zeros_like(logits), False
+
+    king_file = chess.square_file(opp_king)
+    king_rank = chess.square_rank(opp_king)
+
+    # Build king zone (squares around the enemy king)
+    king_zone = set()
+    for df in (-1, 0, 1):
+        for dr in (-1, 0, 1):
+            f, r = king_file + df, king_rank + dr
+            if 0 <= f <= 7 and 0 <= r <= 7:
+                king_zone.add(chess.square(f, r))
+
+    # Count our attackers on the king zone
+    our_attacks = 0
+    for sq in king_zone:
+        our_attacks += len(board.attackers(board.turn, sq))
+
+    # Only fire if we have significant pressure (3+ attacks on king zone)
+    if our_attacks < 3:
+        return torch.zeros_like(logits), False
+
+    delta = torch.zeros_like(logits)
+    fired = False
+
+    for move in board.legal_moves:
+        piece = board.piece_at(move.from_square)
+        if not piece or piece.piece_type == chess.PAWN:
+            continue
+
+        # Chebyshev distance to enemy king
+        from_dist = max(
+            abs(chess.square_file(move.from_square) - king_file),
+            abs(chess.square_rank(move.from_square) - king_rank),
+        )
+        to_dist = max(
+            abs(chess.square_file(move.to_square) - king_file),
+            abs(chess.square_rank(move.to_square) - king_rank),
+        )
+
+        if to_dist > from_dist + 1:  # Moving significantly away
+            idx = _encode_safe(move, board)
+            if idx is not None:
+                delta[idx] -= strength * 2.0
                 fired = True
 
     return delta, fired

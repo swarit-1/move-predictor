@@ -23,6 +23,8 @@ export function usePlayerProfile() {
             rating: data.rating,
             numGames: data.num_games,
             styleSummary: data.style_summary,
+            playerKey: data.player_key,
+            openingBookSize: data.opening_book_size,
           };
           setOpponent(profile);
         } else {
