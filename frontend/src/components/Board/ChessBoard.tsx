@@ -6,7 +6,7 @@ import { usePlayerStore } from "../../store/playerStore";
 import { CapturedPieces } from "./CapturedPieces";
 import type { Square, Piece } from "react-chessboard/dist/chessboard/types";
 
-const MAX_BOARD_SIZE = 560;
+const MAX_BOARD_SIZE = 640;
 const MIN_BOARD_SIZE = 320;
 
 export function ChessBoard() {
@@ -83,7 +83,7 @@ export function ChessBoard() {
       </div>
 
       {/* Board */}
-      <div className="rounded-lg overflow-hidden shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]">
+      <div className="rounded-lg shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]" style={{ position: "relative", zIndex: 10 }}>
         <Chessboard
           position={fen}
           onPieceDrop={(src, tgt, piece) => {
@@ -116,7 +116,7 @@ export function ChessBoard() {
           animationDuration={200}
           autoPromoteToQueen={false}
           customBoardStyle={{
-            borderRadius: "0px",
+            borderRadius: "8px",
           }}
           customDarkSquareStyle={{ backgroundColor: "#779952" }}
           customLightSquareStyle={{ backgroundColor: "#edeed1" }}

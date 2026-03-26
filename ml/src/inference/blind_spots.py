@@ -9,6 +9,7 @@ blind spots common in human chess players:
 3. Check attraction — overplay checks even when they're not best
 4. Piece preference bias — overuse favorite pieces, underuse others
 5. King safety neglect — underweight king safety in calculations
+6. Long-range blindness — miss long diagonal/file slider moves
 
 Each bias operates on the logit distribution *before* temperature scaling,
 nudging the model toward realistic human errors rather than random ones.
@@ -37,24 +38,25 @@ class BlindSpotConfig:
     check_attraction: float = 0.0
     piece_preference: float = 0.0
     king_safety_neglect: float = 0.0
+    long_range_blindness: float = 0.0
 
     @classmethod
     def from_rating(cls, rating: float) -> "BlindSpotConfig":
         """Derive blind spot strengths from player rating.
 
         Lower-rated players have stronger blind spots.
-        Rating 600 → near max blind spots
-        Rating 2400+ → near zero blind spots
+        Rating 600 -> near max blind spots
+        Rating 2400+ -> near zero blind spots
         """
-        # Normalize rating to 0-1 (0 = strong, 1 = weak)
         weakness = max(0.0, min(1.0, (2400 - rating) / 1800))
 
         return cls(
             tactical_blindness=weakness * 0.8,
-            material_greed=weakness * 0.6 + 0.1,  # everyone has some greed
+            material_greed=weakness * 0.6 + 0.1,
             check_attraction=weakness * 0.5 + 0.05,
             piece_preference=weakness * 0.3,
             king_safety_neglect=weakness * 0.5,
+            long_range_blindness=weakness * 0.7,
         )
 
 
@@ -63,7 +65,7 @@ class BlindSpotResult:
     """Result of applying blind spot biases."""
 
     modified_logits: torch.Tensor
-    active_biases: list[str]  # which biases actually fired
+    active_biases: list[str]
 
 
 def compute_blind_spot_biases(
@@ -72,54 +74,57 @@ def compute_blind_spot_biases(
     config: BlindSpotConfig,
     engine_top_moves: list[dict] | None = None,
 ) -> BlindSpotResult:
-    """Apply all blind spot biases to move logits.
-
-    Args:
-        logits: (vocab_size,) raw policy logits.
-        board: Current chess position.
-        config: Blind spot configuration.
-        engine_top_moves: Stockfish top moves for tactical awareness.
-
-    Returns:
-        BlindSpotResult with modified logits and active bias names.
-    """
+    """Apply all blind spot biases to move logits."""
     modified = logits.clone()
     active: list[str] = []
 
-    # 1. Tactical blindness — penalize tactically strong moves the human might miss
     if config.tactical_blindness > 0.05:
-        delta, fired = _apply_tactical_blindness(modified, board, config.tactical_blindness, engine_top_moves)
+        delta, fired = _apply_tactical_blindness(
+            modified, board, config.tactical_blindness, engine_top_moves,
+        )
         modified = modified + delta
         if fired:
             active.append("tactical_blindness")
 
-    # 2. Material greed — boost captures disproportionately
     if config.material_greed > 0.05:
-        delta, fired = _apply_material_greed(modified, board, config.material_greed)
+        delta, fired = _apply_material_greed(
+            modified, board, config.material_greed,
+        )
         modified = modified + delta
         if fired:
             active.append("material_greed")
 
-    # 3. Check attraction — boost checks even when they're not best
     if config.check_attraction > 0.05:
-        delta, fired = _apply_check_attraction(modified, board, config.check_attraction)
+        delta, fired = _apply_check_attraction(
+            modified, board, config.check_attraction,
+        )
         modified = modified + delta
         if fired:
             active.append("check_attraction")
 
-    # 4. Piece preference — boost moves with frequently used pieces
     if config.piece_preference > 0.05:
-        delta, fired = _apply_piece_preference(modified, board, config.piece_preference)
+        delta, fired = _apply_piece_preference(
+            modified, board, config.piece_preference,
+        )
         modified = modified + delta
         if fired:
             active.append("piece_preference")
 
-    # 5. King safety neglect — penalize defensive king moves
     if config.king_safety_neglect > 0.05:
-        delta, fired = _apply_king_safety_neglect(modified, board, config.king_safety_neglect)
+        delta, fired = _apply_king_safety_neglect(
+            modified, board, config.king_safety_neglect,
+        )
         modified = modified + delta
         if fired:
             active.append("king_safety_neglect")
+
+    if config.long_range_blindness > 0.05:
+        delta, fired = _apply_long_range_blindness(
+            modified, board, config.long_range_blindness, engine_top_moves,
+        )
+        modified = modified + delta
+        if fired:
+            active.append("long_range_blindness")
 
     return BlindSpotResult(modified_logits=modified, active_biases=active)
 
@@ -132,7 +137,7 @@ def _encode_safe(move: chess.Move, board: chess.Board) -> int | None:
         return None
 
 
-# ── Bias implementations ────────────────────────────────────────────
+# -- Bias implementations --------------------------------------------------
 
 
 def _apply_tactical_blindness(
@@ -141,23 +146,10 @@ def _apply_tactical_blindness(
     strength: float,
     engine_top_moves: list[dict] | None,
 ) -> tuple[torch.Tensor, bool]:
-    """Penalize moves that require deep tactical calculation.
-
-    Humans often miss:
-    - Moves that involve sacrifices followed by forcing sequences
-    - Quiet moves that set up tactical threats
-    - Discovered attacks and pins
-
-    We detect "tactical" moves as those that:
-    (a) Are in the engine's top-3 but involve non-obvious patterns
-    (b) Involve moving a piece that's currently pinned/pinning
-    (c) Are quiet moves ranked highly by engine (quiet = non-capture, non-check)
-    """
+    """Penalize quiet engine best moves and discovered attacks."""
     delta = torch.zeros_like(logits)
     fired = False
 
-    # Penalize engine top moves that are "quiet" (non-capture, non-check)
-    # These are the hardest for humans to find
     if engine_top_moves:
         for i, em in enumerate(engine_top_moves[:3]):
             uci = em.get("move")
@@ -170,21 +162,19 @@ def _apply_tactical_blindness(
             if move not in board.legal_moves:
                 continue
 
-            is_quiet = not board.is_capture(move) and not board.gives_check(move)
+            is_quiet = (
+                not board.is_capture(move) and not board.gives_check(move)
+            )
             if is_quiet and i == 0:
-                # Top engine move is quiet — this is hard for humans
                 idx = _encode_safe(move, board)
                 if idx is not None:
-                    penalty = -strength * 1.5
-                    delta[idx] += penalty
+                    delta[idx] += -strength * 3.0
                     fired = True
 
-    # Detect and penalize discovered attacks (moving a piece that reveals an attack)
     for move in board.legal_moves:
         if _is_discovered_attack(board, move):
             idx = _encode_safe(move, board)
             if idx is not None:
-                # Humans often miss discovered attacks — slight penalty
                 delta[idx] += -strength * 0.8
                 fired = True
 
@@ -196,42 +186,40 @@ def _apply_material_greed(
     board: chess.Board,
     strength: float,
 ) -> tuple[torch.Tensor, bool]:
-    """Boost captures, especially winning material.
-
-    Humans are attracted to capturing pieces even when a quiet move
-    is objectively better. This bias makes captures "shinier".
-    """
+    """Boost captures proportional to captured piece value."""
     delta = torch.zeros_like(logits)
     fired = False
 
     piece_values = {
-        chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
-        chess.ROOK: 5, chess.QUEEN: 9,
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
     }
 
     for move in board.legal_moves:
-        if board.is_capture(move):
-            captured = board.piece_at(move.to_square)
-            if captured:
-                value = piece_values.get(captured.piece_type, 0)
-                # Boost proportional to captured piece value
-                bonus = strength * (0.3 + value * 0.15)
+        if not board.is_capture(move):
+            continue
 
-                # Extra bonus for "free" captures (undefended pieces)
-                if not board.is_attacked_by(not board.turn, move.to_square):
-                    bonus *= 1.5
+        captured = board.piece_at(move.to_square)
+        if captured:
+            value = piece_values.get(captured.piece_type, 0)
+            bonus = strength * (0.8 + value * 0.4)
 
-                idx = _encode_safe(move, board)
-                if idx is not None:
-                    delta[idx] += bonus
-                    fired = True
+            if not board.is_attacked_by(not board.turn, move.to_square):
+                bonus *= 1.5
 
-            # En passant
-            elif board.is_en_passant(move):
-                idx = _encode_safe(move, board)
-                if idx is not None:
-                    delta[idx] += strength * 0.3
-                    fired = True
+            idx = _encode_safe(move, board)
+            if idx is not None:
+                delta[idx] += bonus
+                fired = True
+
+        elif board.is_en_passant(move):
+            idx = _encode_safe(move, board)
+            if idx is not None:
+                delta[idx] += strength * 0.5
+                fired = True
 
     return delta, fired
 
@@ -241,11 +229,7 @@ def _apply_check_attraction(
     board: chess.Board,
     strength: float,
 ) -> tuple[torch.Tensor, bool]:
-    """Boost checks even when they're not the best move.
-
-    "Patzer sees a check, patzer gives a check." Lower-rated players
-    are magnetically attracted to checks because they feel forcing.
-    """
+    """Boost checks even when they're not the best move."""
     delta = torch.zeros_like(logits)
     fired = False
 
@@ -253,12 +237,9 @@ def _apply_check_attraction(
         if board.gives_check(move):
             idx = _encode_safe(move, board)
             if idx is not None:
-                bonus = strength * 0.8
-
-                # Extra bonus if the check also captures
+                bonus = strength * 2.0
                 if board.is_capture(move):
-                    bonus += strength * 0.4
-
+                    bonus += strength * 0.8
                 delta[idx] += bonus
                 fired = True
 
@@ -270,29 +251,23 @@ def _apply_piece_preference(
     board: chess.Board,
     strength: float,
 ) -> tuple[torch.Tensor, bool]:
-    """Apply piece-type preference biases.
-
-    Humans tend to:
-    - Overuse queens (they're powerful and obvious)
-    - Underuse rooks (harder to activate)
-    - Move knights toward the center
-    - Keep bishops on long diagonals
-    """
+    """Bias toward queen moves, away from rook moves."""
     delta = torch.zeros_like(logits)
     fired = False
 
-    # Piece-type move bonus/penalty
     piece_bias = {
-        chess.QUEEN: 0.3,   # Humans love moving their queen
-        chess.KNIGHT: 0.1,  # Knights are fun
-        chess.BISHOP: 0.0,  # Neutral
-        chess.ROOK: -0.15,  # Rooks are underused by weaker players
-        chess.KING: -0.1,   # Avoid moving king unless necessary
+        chess.QUEEN: 0.3,
+        chess.KNIGHT: 0.1,
+        chess.BISHOP: 0.0,
+        chess.ROOK: -0.15,
+        chess.KING: -0.1,
     }
 
-    center_squares = {chess.E4, chess.D4, chess.E5, chess.D5,
-                      chess.C3, chess.D3, chess.E3, chess.F3,
-                      chess.C6, chess.D6, chess.E6, chess.F6}
+    center_squares = {
+        chess.E4, chess.D4, chess.E5, chess.D5,
+        chess.C3, chess.D3, chess.E3, chess.F3,
+        chess.C6, chess.D6, chess.E6, chess.F6,
+    }
 
     for move in board.legal_moves:
         piece = board.piece_at(move.from_square)
@@ -306,11 +281,11 @@ def _apply_piece_preference(
         idx = _encode_safe(move, board)
         if idx is not None:
             bonus = strength * bias
-
-            # Extra bonus for knight moves toward center
-            if piece.piece_type == chess.KNIGHT and move.to_square in center_squares:
+            if (
+                piece.piece_type == chess.KNIGHT
+                and move.to_square in center_squares
+            ):
                 bonus += strength * 0.15
-
             delta[idx] += bonus
             fired = True
 
@@ -322,13 +297,7 @@ def _apply_king_safety_neglect(
     board: chess.Board,
     strength: float,
 ) -> tuple[torch.Tensor, bool]:
-    """Penalize defensive/prophylactic moves.
-
-    Weaker players often neglect king safety:
-    - Ignore prophylactic pawn moves (h3, a3 to prevent pins/back rank)
-    - Don't prioritize castling when the king is in the center
-    - Miss defensive moves that prevent threats
-    """
+    """Penalize non-castling when castling is available."""
     delta = torch.zeros_like(logits)
     fired = False
 
@@ -337,8 +306,6 @@ def _apply_king_safety_neglect(
     if king_sq is None:
         return delta, False
 
-    # If king is still in center and castling is available, penalize non-castling moves
-    # (weaker players often delay castling)
     king_in_center = king_sq in (chess.E1, chess.E8)
     can_castle = board.has_castling_rights(side)
 
@@ -347,17 +314,14 @@ def _apply_king_safety_neglect(
             if not board.is_castling(move):
                 idx = _encode_safe(move, board)
                 if idx is not None:
-                    # Small penalty for non-castling when castling is available
-                    delta[idx] += -strength * 0.2
+                    delta[idx] += -strength * 0.5
                     fired = True
             else:
-                # Small bonus for castling (but weaker players still delay it)
                 idx = _encode_safe(move, board)
                 if idx is not None:
-                    delta[idx] += strength * 0.1
+                    delta[idx] += strength * 0.2
                     fired = True
 
-    # Penalize prophylactic pawn moves (h3, a3 type moves)
     prophylactic_squares = {
         chess.WHITE: {chess.H3, chess.A3, chess.G3},
         chess.BLACK: {chess.H6, chess.A6, chess.G6},
@@ -366,30 +330,75 @@ def _apply_king_safety_neglect(
     for move in board.legal_moves:
         piece = board.piece_at(move.from_square)
         if piece and piece.piece_type == chess.PAWN:
-            if move.to_square in prophylactic_squares.get(side, set()):
-                # Only penalize if the pawn move is purely defensive
-                if not board.is_capture(move):
-                    idx = _encode_safe(move, board)
-                    if idx is not None:
-                        delta[idx] += -strength * 0.3
-                        fired = True
+            targets = prophylactic_squares.get(side, set())
+            if move.to_square in targets and not board.is_capture(move):
+                idx = _encode_safe(move, board)
+                if idx is not None:
+                    delta[idx] += -strength * 0.5
+                    fired = True
 
     return delta, fired
 
 
-# ── Utility functions ───────────────────────────────────────────────
+def _apply_long_range_blindness(
+    logits: torch.Tensor,
+    board: chess.Board,
+    strength: float,
+    engine_top_moves: list[dict] | None,
+) -> tuple[torch.Tensor, bool]:
+    """Penalize engine moves that involve long-range slider activity.
+
+    Lower-rated players consistently miss long diagonal bishop snipes,
+    rook lifts along open files, and distant queen maneuvers.
+    """
+    delta = torch.zeros_like(logits)
+    fired = False
+
+    if not engine_top_moves:
+        return delta, fired
+
+    for i, em in enumerate(engine_top_moves[:3]):
+        uci = em.get("move")
+        if not uci:
+            continue
+        try:
+            move = chess.Move.from_uci(uci)
+        except ValueError:
+            continue
+        if move not in board.legal_moves:
+            continue
+
+        piece = board.piece_at(move.from_square)
+        if not piece:
+            continue
+
+        if piece.piece_type not in (chess.BISHOP, chess.ROOK, chess.QUEEN):
+            continue
+
+        from_file = chess.square_file(move.from_square)
+        from_rank = chess.square_rank(move.from_square)
+        to_file = chess.square_file(move.to_square)
+        to_rank = chess.square_rank(move.to_square)
+        distance = max(abs(from_file - to_file), abs(from_rank - to_rank))
+
+        if distance >= 4:
+            idx = _encode_safe(move, board)
+            if idx is not None:
+                penalty = -strength * (0.5 + distance * 0.3)
+                delta[idx] += penalty
+                fired = True
+
+    return delta, fired
+
+
+# -- Utility functions ------------------------------------------------------
 
 
 def _is_discovered_attack(board: chess.Board, move: chess.Move) -> bool:
-    """Check if a move creates a discovered attack.
-
-    A discovered attack occurs when moving a piece reveals an attack
-    by another piece behind it on the opponent's king.
-    """
+    """Check if a move creates a discovered attack on the opponent's king."""
     from_sq = move.from_square
     side = board.turn
 
-    # Get all sliding pieces of our side (bishops, rooks, queens)
     sliders = (
         board.pieces(chess.BISHOP, side)
         | board.pieces(chess.ROOK, side)
@@ -404,7 +413,6 @@ def _is_discovered_attack(board: chess.Board, move: chess.Move) -> bool:
         if slider_sq == from_sq:
             continue
 
-        # Check if from_sq lies on the ray between slider and opponent's king
         ray_mask = chess.ray(slider_sq, opp_king)
         if not ray_mask:
             continue
@@ -412,9 +420,10 @@ def _is_discovered_attack(board: chess.Board, move: chess.Move) -> bool:
         if not (chess.BB_SQUARES[from_sq] & ray_mask):
             continue
 
-        # The piece at from_sq is on the ray — check if it's the only blocker
         between_mask = chess.between(slider_sq, opp_king)
-        blockers = board.occupied & between_mask & ~chess.BB_SQUARES[from_sq]
+        blockers = (
+            board.occupied & between_mask & ~chess.BB_SQUARES[from_sq]
+        )
         if not blockers:
             return True
 

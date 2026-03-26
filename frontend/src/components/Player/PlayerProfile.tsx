@@ -18,19 +18,23 @@ export function PlayerProfile() {
         </span>
       </div>
 
-      <p className="text-xs text-zinc-500 font-light">
-        {opponent.numGames} games from {opponent.source}
-      </p>
+      {opponent.numGames > 0 && (
+        <p className="text-xs text-zinc-500 font-light">
+          {opponent.numGames} games from {opponent.source}
+        </p>
+      )}
 
-      <div className="space-y-2">
-        <StyleBar label="Aggression" value={style.aggression} color="blunder" />
-        <StyleBar label="Tactical" value={style.tactical} color="inaccuracy" />
-        <StyleBar label="Accuracy" value={style.accuracy} color="human" />
-        <StyleBar label="Consistency" value={style.consistency} color="engine" />
-        <StyleBar label="Opening Variety" value={style.opening_diversity} color="gold" />
-      </div>
+      {style && (
+        <div className="space-y-2">
+          <StyleBar label="Aggression" value={style.aggression} color="blunder" />
+          <StyleBar label="Tactical" value={style.tactical} color="inaccuracy" />
+          <StyleBar label="Accuracy" value={style.accuracy} color="human" />
+          <StyleBar label="Consistency" value={style.consistency} color="engine" />
+          <StyleBar label="Opening Variety" value={style.opening_diversity} color="gold" />
+        </div>
+      )}
 
-      {Object.keys(style.preferred_openings).length > 0 && (
+      {style && Object.keys(style.preferred_openings).length > 0 && (
         <div>
           <p className="text-[10px] text-zinc-500 mb-1.5 font-medium uppercase tracking-wider">Openings</p>
           <div className="flex flex-wrap gap-1.5">

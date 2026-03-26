@@ -7,9 +7,10 @@ type OpponentTab = "profile" | "rating" | "style";
 
 interface Props {
   onStart: () => void;
+  onBack?: () => void;
 }
 
-export function SetupScreen({ onStart }: Props) {
+export function SetupScreen({ onStart, onBack }: Props) {
   const [activeTab, setActiveTab] = useState<OpponentTab>("rating");
   const [source, setSource] = useState<"lichess" | "chesscom">("lichess");
   const [username, setUsername] = useState("");
@@ -32,34 +33,20 @@ export function SetupScreen({ onStart }: Props) {
   const handleStart = () => {
     if (activeTab === "rating" && !opponent) {
       usePlayerStore.getState().setOpponent({
-        username: `${manualRating}-rated player`,
-        source: "manual",
+        username: `${manualRating}-rated opponent`,
+        source: "rating",
         rating: manualRating,
         numGames: 0,
-        styleSummary: {
-          aggression: styleOverrides.aggression,
-          tactical: 50,
-          accuracy: Math.min(95, manualRating / 30),
-          consistency: 50,
-          opening_diversity: 50,
-          preferred_openings: {},
-        },
+        styleSummary: null,
       });
     }
     if (activeTab === "style" && !opponent) {
       usePlayerStore.getState().setOpponent({
         username: "Custom opponent",
-        source: "manual",
+        source: "style",
         rating: 1500,
         numGames: 0,
-        styleSummary: {
-          aggression: styleOverrides.aggression,
-          tactical: 50,
-          accuracy: 50,
-          consistency: 50,
-          opening_diversity: 50,
-          preferred_openings: {},
-        },
+        styleSummary: null,
       });
     }
     onStart();
@@ -74,6 +61,19 @@ export function SetupScreen({ onStart }: Props) {
   return (
     <div className="min-h-screen bg-surface-0 flex items-center justify-center p-6 relative overflow-hidden">
       <div className="w-full max-w-lg relative animate-fade-in">
+        {/* Back button */}
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200 transition-colors duration-200 group mb-6"
+          >
+            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+            </svg>
+            <span className="font-medium">Back</span>
+          </button>
+        )}
+
         {/* Title */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 mb-4">
@@ -315,22 +315,24 @@ function ProfileTab({
             </span>
           </div>
 
-          <div className="grid grid-cols-5 gap-1.5">
-            {[
-              { label: "AGG", value: opponent.styleSummary.aggression, color: "text-blunder" },
-              { label: "TAC", value: opponent.styleSummary.tactical, color: "text-inaccuracy" },
-              { label: "ACC", value: opponent.styleSummary.accuracy, color: "text-human" },
-              { label: "CON", value: opponent.styleSummary.consistency, color: "text-engine" },
-              { label: "VAR", value: opponent.styleSummary.opening_diversity, color: "text-gold" },
-            ].map((stat) => (
-              <div key={stat.label} className="text-center py-2 bg-white/[0.03] rounded-xl">
-                <p className={`text-sm font-bold font-mono ${stat.color}`}>
-                  {stat.value}
-                </p>
-                <p className="text-[9px] text-zinc-600 mt-0.5 font-medium">{stat.label}</p>
-              </div>
-            ))}
-          </div>
+          {opponent.styleSummary && (
+            <div className="grid grid-cols-5 gap-1.5">
+              {[
+                { label: "AGG", value: opponent.styleSummary.aggression, color: "text-blunder" },
+                { label: "TAC", value: opponent.styleSummary.tactical, color: "text-inaccuracy" },
+                { label: "ACC", value: opponent.styleSummary.accuracy, color: "text-human" },
+                { label: "CON", value: opponent.styleSummary.consistency, color: "text-engine" },
+                { label: "VAR", value: opponent.styleSummary.opening_diversity, color: "text-gold" },
+              ].map((stat) => (
+                <div key={stat.label} className="text-center py-2 bg-white/[0.03] rounded-xl">
+                  <p className={`text-sm font-bold font-mono ${stat.color}`}>
+                    {stat.value}
+                  </p>
+                  <p className="text-[9px] text-zinc-600 mt-0.5 font-medium">{stat.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

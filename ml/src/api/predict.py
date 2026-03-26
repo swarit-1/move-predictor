@@ -12,6 +12,7 @@ class PredictRequest(BaseModel):
     move_history: list[str] = []
     player_id: int = 0
     player_rating: float = 1500.0
+    player_key: str | None = None  # source:username for opening book lookup
     style_overrides: dict | None = None  # {aggression, risk_taking, blunder_frequency}
 
 
@@ -81,6 +82,7 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             player_rating=request.player_rating,
             style=style,
             engine_top_moves=engine_top_moves,
+            player_key=request.player_key,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))

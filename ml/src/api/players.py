@@ -1,7 +1,16 @@
 """Player profile and embedding endpoints."""
 
+import logging
+from io import StringIO
+
+import chess.pgn
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from src.data.opening_book import OpeningBook
+from src.inference.pipeline import prediction_pipeline
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -62,6 +71,26 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
             "other": round(stats.other_opening_ratio * 100),
         },
     }
+
+    # Build opening book from the fetched games
+    book = OpeningBook()
+    for pgn_text in pgn_texts:
+        try:
+            game = chess.pgn.read_game(StringIO(pgn_text))
+            if game is None:
+                continue
+            moves = [move.uci() for move in game.mainline_moves()]
+            book.add_game(moves)
+        except Exception:
+            continue
+
+    # Register the book with the prediction pipeline
+    player_key = f"{request.source}:{request.username}".lower()
+    prediction_pipeline.set_opening_book(player_key, book)
+    logger.info(
+        "Built opening book for %s: %d games, %d nodes",
+        player_key, book.total_games, book.size,
+    )
 
     return PlayerProfile(
         username=request.username,

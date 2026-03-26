@@ -197,14 +197,51 @@ class PredictionPipeline:
                 except (ValueError, IndexError):
                     continue
 
-            # Give all other legal moves a small base logit so they're not
-            # completely impossible (humans don't always play top engine moves)
+            # Non-engine moves get piece-type-weighted logits.
+            # The key insight: -1.0 was WAY too close to engine moves (5.0).
+            # With temperature ~0.8, queen/rook shuffles each got ~1-2%,
+            # and with 30+ such moves, random shuffling dominated.
+            # Now: queen/rook shuffles at -4.0 are effectively impossible
+            # unless temperature is very high, while natural moves (pawn
+            # pushes, knight development) remain plausible alternatives.
             for move in board.legal_moves:
                 try:
                     idx = encode_move(move, board)
-                    if logits[idx] == float("-inf"):
-                        # Small logit — these moves are legal but not engine-favored
-                        logits[idx] = -1.0 + random.gauss(0, 0.3)
+                    if logits[idx] != float("-inf"):
+                        continue  # Already assigned as engine move
+
+                    piece = board.piece_at(move.from_square)
+                    base_logit = -4.0
+
+                    if piece:
+                        pt = piece.piece_type
+                        if pt == chess.PAWN:
+                            base_logit = -1.5
+                            # Central pawn pushes are more natural
+                            to_file = chess.square_file(move.to_square)
+                            if to_file in (2, 3, 4, 5):  # c-f files
+                                base_logit = -1.0
+                        elif pt == chess.KNIGHT:
+                            base_logit = -2.0
+                            to_rank = chess.square_rank(move.to_square)
+                            to_file = chess.square_file(move.to_square)
+                            if 2 <= to_file <= 5 and 2 <= to_rank <= 5:
+                                base_logit = -1.5
+                        elif pt == chess.BISHOP:
+                            base_logit = -2.0
+                        elif pt == chess.ROOK:
+                            # Rook shuffles are the #2 tell of random play
+                            base_logit = -3.5
+                        elif pt == chess.QUEEN:
+                            # Random queen moves are the #1 tell
+                            base_logit = -4.0
+                        elif pt == chess.KING:
+                            if board.is_castling(move):
+                                base_logit = -0.5  # Castling is natural
+                            else:
+                                base_logit = -4.5
+
+                    logits[idx] = base_logit + random.gauss(0, 0.15)
                 except (ValueError, IndexError):
                     continue
         else:

@@ -2,7 +2,6 @@
 
 import chess
 import torch
-import pytest
 
 from src.inference.sampler import (
     compute_temperature,

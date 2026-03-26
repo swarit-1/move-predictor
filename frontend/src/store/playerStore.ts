@@ -1,18 +1,20 @@
 import { create } from "zustand";
 
+export interface StyleSummary {
+  aggression: number;
+  tactical: number;
+  accuracy: number;
+  consistency: number;
+  opening_diversity: number;
+  preferred_openings: Record<string, number>;
+}
+
 export interface PlayerProfile {
   username: string;
   source: string;
   rating: number;
   numGames: number;
-  styleSummary: {
-    aggression: number;
-    tactical: number;
-    accuracy: number;
-    consistency: number;
-    opening_diversity: number;
-    preferred_openings: Record<string, number>;
-  };
+  styleSummary: StyleSummary | null;
 }
 
 export interface StyleOverrides {

@@ -67,6 +67,7 @@ class MLClient {
     move_history?: string[];
     player_id?: number;
     player_rating?: number;
+    player_key?: string;
     style_overrides?: {
       aggression?: number;
       risk_taking?: number;

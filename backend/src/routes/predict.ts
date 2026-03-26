@@ -59,6 +59,7 @@ const predictSchema = z.object({
   move_history: z.array(z.string()).optional().default([]),
   player_id: z.number().int().optional().default(0),
   player_rating: z.number().min(0).max(4000).optional().default(1500),
+  player_key: z.string().optional(),
   style_overrides: z
     .object({
       aggression: z.number().min(0).max(100).optional(),
@@ -91,6 +92,7 @@ predictRouter.post("/", async (req: Request, res: Response) => {
       move_history: params.move_history,
       player_id: params.player_id,
       player_rating: params.player_rating,
+      player_key: params.player_key,
       style_overrides: params.style_overrides,
     });
 

@@ -2,7 +2,6 @@
 
 import chess
 import torch
-import pytest
 
 from src.inference.blind_spots import (
     BlindSpotConfig,
@@ -26,6 +25,7 @@ class TestBlindSpotConfig:
         assert config.tactical_blindness == 0.0
         assert config.piece_preference == 0.0
         assert config.king_safety_neglect == 0.0
+        assert config.long_range_blindness == 0.0
 
     def test_intermediate_player(self):
         config = BlindSpotConfig.from_rating(1500)
@@ -38,7 +38,8 @@ class TestBlindSpotConfig:
         high = BlindSpotConfig.from_rating(3500)
 
         for field in ["tactical_blindness", "material_greed", "check_attraction",
-                       "piece_preference", "king_safety_neglect"]:
+                       "piece_preference", "king_safety_neglect",
+                       "long_range_blindness"]:
             assert 0.0 <= getattr(low, field) <= 1.0
             assert 0.0 <= getattr(high, field) <= 1.0
 

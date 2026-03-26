@@ -168,7 +168,7 @@ export function GameScreen({ onBack }: Props) {
 
       {/* Main game area */}
       <main className="flex-1 flex items-start justify-center pt-5 sm:pt-8 pb-16 px-2 sm:px-6">
-        <div className="flex flex-col lg:flex-row gap-5 lg:gap-6 items-center lg:items-start w-full max-w-[1040px]">
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-5 items-center lg:items-start w-full max-w-[1280px]">
           {/* Eval bar + Board */}
           <div className="flex items-start gap-3 flex-shrink-0">
             {showEvalBar && <EvalBar />}
@@ -184,7 +184,7 @@ export function GameScreen({ onBack }: Props) {
           </div>
 
           {/* Analysis sidebar */}
-          <div className="w-full lg:w-[320px] space-y-3 flex-shrink-0 animate-slide-in-right">
+          <div className="w-full lg:w-[340px] space-y-3 flex-shrink-0 animate-slide-in-right">
             {showStylePanel && <StylePanel />}
             <PredictionPanel />
             <Explainability />

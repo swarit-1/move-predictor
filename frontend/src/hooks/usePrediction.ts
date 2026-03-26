@@ -16,11 +16,17 @@ export function usePrediction() {
 
     setLoading(true);
     try {
+      // Build player_key for opening book lookup (only for real player profiles)
+      const playerKey = opponent && opponent.source !== "rating" && opponent.source !== "style"
+        ? `${opponent.source}:${opponent.username}`.toLowerCase()
+        : undefined;
+
       const response = await predictMove({
         fen,
         move_history: moveHistory,
         player_id: 0,
         player_rating: opponent?.rating || 1500,
+        player_key: playerKey,
         style_overrides: {
           aggression: styleOverrides.aggression,
           risk_taking: styleOverrides.risk_taking,
