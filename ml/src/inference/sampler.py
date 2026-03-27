@@ -63,9 +63,10 @@ def compute_temperature(
     Lower temperature = more deterministic (engine-like)
     Higher temperature = more random (human-like, error-prone)
 
-    With blind spot biases handling structured errors, temperature now has
-    a tighter range (0.2–1.5) and primarily controls move-selection variance
-    rather than being the sole source of human-like mistakes.
+    With blind spot biases and nucleus (top-p) sampling handling error
+    modeling, temperature only controls variance among candidate moves.
+    Ceiling is 1.0 — top-p prevents tail sampling, blind spots create
+    structured errors.
 
     Args:
         predicted_cpl: Model's predicted centipawn loss.
@@ -75,33 +76,32 @@ def compute_temperature(
         time_pressure: 0.0 (no pressure) to 1.0 (extreme time pressure).
 
     Returns:
-        Temperature value (typically 0.2 to 1.5).
+        Temperature value (0.25 to 1.0).
     """
     if style is None:
         style = StyleOverrides()
 
-    # Base temperature from rating — reduced range since blind spots
-    # now handle the heavy lifting for error modeling
-    # Maps ~600-2800 rating to ~1.2-0.2 temperature
-    rating_temp = max(0.2, 1.4 - (player_rating / 2200.0))
+    # Base temperature from rating — tight range since top-p prevents
+    # tail sampling. Maps 400-2800 to 0.9-0.3
+    rating_temp = max(0.3, 0.95 - (player_rating / 4000.0))
 
-    # Lighter error adjustment (blind spots cover most of this now)
-    error_temp = 0.3 * predicted_cpl + 0.2 * blunder_prob
+    # Light error adjustment
+    error_temp = 0.2 * predicted_cpl + 0.1 * blunder_prob
 
     # Style adjustments
-    risk_factor = style.risk_taking / 100.0  # 0 to 1
-    blunder_factor = style.blunder_frequency / 100.0  # 0 to 1
+    risk_factor = style.risk_taking / 100.0
+    blunder_factor = style.blunder_frequency / 100.0
 
-    temperature = rating_temp + error_temp * 0.3
-    temperature *= (0.6 + 0.8 * risk_factor)  # risk slider scales temperature
-    temperature *= (0.8 + 0.4 * blunder_factor)  # blunder slider (reduced impact)
+    temperature = rating_temp + error_temp * 0.2
+    temperature *= (0.7 + 0.6 * risk_factor)
+    temperature *= (0.85 + 0.3 * blunder_factor)
 
     # Time pressure increases temperature (more errors under time trouble)
     if time_pressure > 0:
         temperature *= (1.0 + 0.5 * time_pressure)
 
-    # Tighter clamp — blind spots do the error work, temperature just adds variance
-    return max(0.2, min(1.5, temperature))
+    # Hard ceiling at 1.0 — blind spots + top-p handle all error modeling
+    return max(0.25, min(1.0, temperature))
 
 
 def apply_style_bias(
@@ -146,6 +146,67 @@ def apply_style_bias(
         modified[idx] += bonus
 
     return modified
+
+
+def _compute_top_p(player_rating: float) -> float:
+    """Compute nucleus sampling threshold based on player rating.
+
+    Higher-rated players consider fewer candidate moves (tighter top-p).
+    Lower-rated players consider more candidates (wider top-p) but
+    still never pick from the garbage tail.
+
+    Rating 400  -> top_p = 0.97 (considers ~15-20 moves)
+    Rating 1000 -> top_p = 0.95 (considers ~10-15 moves)
+    Rating 1500 -> top_p = 0.92 (considers ~7-10 moves)
+    Rating 2000 -> top_p = 0.88 (considers ~5-7 moves)
+    Rating 2500 -> top_p = 0.82 (considers ~3-5 moves)
+    """
+    top_p = 0.97 - (player_rating - 400) * (0.15 / 2100)
+    return max(0.80, min(0.98, top_p))
+
+
+def _apply_nucleus_sampling(
+    probs: torch.Tensor,
+    top_p: float,
+) -> torch.Tensor:
+    """Apply nucleus (top-p) sampling to a probability distribution.
+
+    Keeps only the smallest set of moves whose cumulative probability
+    exceeds top_p, then renormalizes. All other moves get zero probability.
+
+    This eliminates random blunders from the tail of the distribution
+    while preserving blind-spot-boosted human-like mistakes that have
+    high enough probability to be in the nucleus.
+
+    Args:
+        probs: (vocab_size,) probability distribution after softmax.
+        top_p: Cumulative probability threshold (0.80 to 0.98).
+
+    Returns:
+        Filtered and renormalized probability distribution.
+    """
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    cumulative_probs = torch.cumsum(sorted_probs, dim=0)
+
+    # Keep moves up to and including the one that pushes past top_p
+    cutoff_mask = cumulative_probs <= top_p
+    cutoff_mask = torch.cat([
+        torch.tensor([True], device=probs.device),
+        cutoff_mask[:-1],
+    ])
+
+    sorted_probs[~cutoff_mask] = 0.0
+
+    # Reconstruct original ordering
+    filtered_probs = torch.zeros_like(probs)
+    filtered_probs.scatter_(0, sorted_indices, sorted_probs)
+
+    # Renormalize
+    total = filtered_probs.sum()
+    if total > 0:
+        filtered_probs = filtered_probs / total
+
+    return filtered_probs
 
 
 def sample_move(
@@ -218,11 +279,25 @@ def sample_move(
     # Compute temperature
     temperature = compute_temperature(predicted_cpl, blunder_prob, player_rating, style, time_pressure)
 
-    # Apply temperature and sample
+    # Apply temperature
     scaled_logits = logits / temperature
     probs = F.softmax(scaled_logits, dim=-1)
 
-    # Sample from the distribution
+    # Nucleus (top-p) sampling: only consider moves within the top-p
+    # probability mass. This eliminates random garbage moves from the
+    # tail while keeping structured human errors from blind spots.
+    top_p = _compute_top_p(player_rating)
+    probs = _apply_nucleus_sampling(probs, top_p)
+
+    # Hard floor: zero out any move with < 0.3% probability.
+    # No human would play a move that's correct less than 1 in 300 times.
+    min_prob = 0.003
+    probs[probs < min_prob] = 0.0
+    prob_sum = probs.sum()
+    if prob_sum > 0:
+        probs = probs / prob_sum
+
+    # Sample from the filtered distribution
     move_idx = torch.multinomial(probs, num_samples=1).item()
 
     # Decode the move

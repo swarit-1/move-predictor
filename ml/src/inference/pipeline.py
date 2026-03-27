@@ -341,31 +341,31 @@ class PredictionPipeline:
                         continue
 
                     piece = board.piece_at(move.from_square)
-                    base_logit = -4.0
+                    base_logit = -7.0
 
                     if piece:
                         pt = piece.piece_type
                         if pt == chess.PAWN:
                             to_file = chess.square_file(move.to_square)
-                            base_logit = -1.0 if to_file in (2, 3, 4, 5) else -1.5
+                            base_logit = -2.0 if to_file in (2, 3, 4, 5) else -3.0
                         elif pt == chess.KNIGHT:
                             to_rank = chess.square_rank(move.to_square)
                             to_file = chess.square_file(move.to_square)
                             if 2 <= to_file <= 5 and 2 <= to_rank <= 5:
-                                base_logit = -1.5
+                                base_logit = -3.0
                             else:
-                                base_logit = -2.5
+                                base_logit = -4.0
                         elif pt == chess.BISHOP:
-                            base_logit = -2.5
-                        elif pt == chess.ROOK:
-                            base_logit = -4.0
-                        elif pt == chess.QUEEN:
                             base_logit = -5.0
+                        elif pt == chess.ROOK:
+                            base_logit = -7.0
+                        elif pt == chess.QUEEN:
+                            base_logit = -8.0
                         elif pt == chess.KING:
                             if board.is_castling(move):
                                 base_logit = -0.5
                             else:
-                                base_logit = -5.0
+                                base_logit = -10.0
 
                     logits[idx] = base_logit + random.gauss(0, 0.15)
                 except (ValueError, IndexError):

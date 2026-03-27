@@ -178,14 +178,14 @@ def _apply_tactical_blindness(
             if is_quiet and i == 0:
                 idx = _encode_safe(move, board)
                 if idx is not None:
-                    delta[idx] += -strength * 3.0
+                    delta[idx] += -strength * 4.0
                     fired = True
 
     for move in board.legal_moves:
         if _is_discovered_attack(board, move):
             idx = _encode_safe(move, board)
             if idx is not None:
-                delta[idx] += -strength * 0.8
+                delta[idx] += -strength * 1.5
                 fired = True
 
     return delta, fired
@@ -215,10 +215,10 @@ def _apply_material_greed(
         captured = board.piece_at(move.to_square)
         if captured:
             value = piece_values.get(captured.piece_type, 0)
-            bonus = strength * (0.8 + value * 0.4)
+            bonus = strength * (1.5 + value * 0.6)
 
             if not board.is_attacked_by(not board.turn, move.to_square):
-                bonus *= 1.5
+                bonus *= 2.0
 
             idx = _encode_safe(move, board)
             if idx is not None:
@@ -247,9 +247,9 @@ def _apply_check_attraction(
         if board.gives_check(move):
             idx = _encode_safe(move, board)
             if idx is not None:
-                bonus = strength * 2.0
+                bonus = strength * 3.0
                 if board.is_capture(move):
-                    bonus += strength * 0.8
+                    bonus += strength * 1.5
                 delta[idx] += bonus
                 fired = True
 
@@ -324,12 +324,12 @@ def _apply_king_safety_neglect(
             if not board.is_castling(move):
                 idx = _encode_safe(move, board)
                 if idx is not None:
-                    delta[idx] += -strength * 0.5
+                    delta[idx] += -strength * 0.8
                     fired = True
             else:
                 idx = _encode_safe(move, board)
                 if idx is not None:
-                    delta[idx] += strength * 0.2
+                    delta[idx] += strength * 0.4
                     fired = True
 
     prophylactic_squares = {

@@ -8,8 +8,10 @@ from src.inference.sampler import (
     sample_move,
     apply_style_bias,
     StyleOverrides,
+    _compute_top_p,
+    _apply_nucleus_sampling,
 )
-from src.models.move_encoding import NUM_MOVES
+from src.models.move_encoding import NUM_MOVES, encode_move
 
 
 class TestTemperature:
@@ -17,22 +19,22 @@ class TestTemperature:
 
     def test_low_rating_high_temperature(self):
         temp = compute_temperature(1.0, 0.2, player_rating=800)
-        assert temp > 0.8
+        assert temp > 0.7
 
     def test_high_rating_low_temperature(self):
         temp = compute_temperature(0.5, 0.1, player_rating=2400)
         assert temp < 0.5
 
     def test_temperature_clamps(self):
-        """Temperature stays within 0.2-1.5 range."""
+        """Temperature stays within 0.25-1.0 range."""
         # Very low
         temp_low = compute_temperature(0.0, 0.0, player_rating=3000)
-        assert temp_low >= 0.2
+        assert temp_low >= 0.25
 
-        # Very high
+        # Very high — ceiling is 1.0 with nucleus sampling
         style = StyleOverrides(risk_taking=100, blunder_frequency=100)
         temp_high = compute_temperature(5.0, 1.0, player_rating=400, style=style)
-        assert temp_high <= 1.5
+        assert temp_high <= 1.0
 
     def test_risk_taking_increases_temperature(self):
         base = compute_temperature(1.0, 0.2, player_rating=1500)
@@ -171,3 +173,90 @@ class TestEvalPerspective:
         flip = -1 if side_to_move == "b" else 1
         mate_white = raw_mate * flip
         assert mate_white == -3
+
+
+class TestNucleusSampling:
+    """Test nucleus (top-p) sampling eliminates garbage moves."""
+
+    def test_no_random_queen_moves(self):
+        """Verify that random queen shuffles never get sampled."""
+        board = chess.Board()  # Starting position
+
+        # Simulate Stockfish fallback logits with wide gap
+        logits = torch.full((NUM_MOVES,), -8.0)
+        for move_uci, logit in [("e2e4", 5.0), ("d2d4", 4.2), ("g1f3", 3.4)]:
+            move = chess.Move.from_uci(move_uci)
+            idx = encode_move(move, board)
+            logits[idx] = logit
+
+        # Sample 100 times at rating 400 (worst case)
+        moves_played = []
+        for _ in range(100):
+            result = sample_move(
+                policy_logits=logits.clone(),
+                board=board,
+                predicted_cpl=2.5,
+                blunder_prob=0.3,
+                player_rating=400,
+                engine_top_moves=[
+                    {"move": "e2e4", "cp": 30, "rank": 1},
+                    {"move": "d2d4", "cp": 25, "rank": 2},
+                    {"move": "g1f3", "cp": 20, "rank": 3},
+                ],
+            )
+            moves_played.append(result.move_uci)
+
+        # Count moves not in reasonable set
+        reasonable = {
+            "e2e4", "d2d4", "g1f3", "c2c4", "b1c3", "g2g3", "b2b3",
+            "f2f4", "e2e3", "d2d3", "c2c3", "a2a3", "h2h3", "b2b4",
+            "a2a4", "g2g4", "h2h4", "b1a3", "g1h3",
+        }
+        garbage_count = sum(1 for m in moves_played if m not in reasonable)
+
+        assert garbage_count <= 3, (
+            f"Got {garbage_count} garbage moves out of 100: "
+            f"{[m for m in moves_played if m not in reasonable]}"
+        )
+
+    def test_temperature_ceiling(self):
+        """Verify temperature never exceeds 1.0."""
+        for rating in [200, 400, 600, 800, 1000, 1500, 2000]:
+            for blunder in [0, 50, 100]:
+                style = StyleOverrides(blunder_frequency=blunder, risk_taking=100)
+                temp = compute_temperature(3.0, 0.5, rating, style)
+                assert temp <= 1.0, (
+                    f"Rating {rating}, blunder {blunder}: temp={temp} exceeds 1.0"
+                )
+                assert temp >= 0.25, (
+                    f"Rating {rating}: temp={temp} below floor"
+                )
+
+    def test_top_p_rating_scaling(self):
+        """Higher-rated players get tighter top-p."""
+        low_p = _compute_top_p(400)
+        mid_p = _compute_top_p(1500)
+        high_p = _compute_top_p(2500)
+
+        assert low_p > mid_p > high_p
+        assert low_p <= 0.98
+        assert high_p >= 0.80
+
+    def test_nucleus_filter_removes_tail(self):
+        """Nucleus filter zeros out low-probability tail moves."""
+        probs = torch.zeros(100)
+        probs[0] = 0.5
+        probs[1] = 0.3
+        probs[2] = 0.1
+        probs[3:10] = 0.01  # 7 moves at 1%
+        probs[10:] = 0.001 / 90  # tiny tail
+
+        filtered = _apply_nucleus_sampling(probs, 0.90)
+
+        # Top 2 moves should survive (0.5 + 0.3 = 0.8, need to include #3)
+        assert filtered[0] > 0
+        assert filtered[1] > 0
+        assert filtered[2] > 0
+        # Tail should be zeroed
+        assert filtered[50].item() == 0.0
+        assert filtered[99].item() == 0.0

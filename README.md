@@ -16,6 +16,9 @@ The system fetches real player games from Lichess and Chess.com, builds per-play
   - [Model Components](#model-components)
   - [Multi-Task Learning](#multi-task-learning)
   - [Skill-Aware Sampling](#skill-aware-sampling)
+  - [Blind Spot Biases](#blind-spot-biases)
+  - [Nucleus Sampling](#nucleus-top-p-sampling)
+  - [Lichess Opening Explorer Integration](#lichess-opening-explorer-integration)
   - [Stockfish Fallback](#stockfish-fallback-no-checkpoint-mode)
 - [Data Pipeline](#data-pipeline)
   - [Ingestion](#ingestion)
@@ -241,20 +244,20 @@ An optional uncertainty-based weighting mode (Kendall et al., "Multi-Task Learni
 
 ### Skill-Aware Sampling
 
-This is the core differentiator of the system. At inference time, the model does **not** use `argmax` to select the most probable move. Instead, it samples from the predicted distribution with a temperature parameter computed from:
+This is the core differentiator of the system. At inference time, the model does **not** use `argmax` to select the most probable move. Instead, it uses a three-stage sampling pipeline:
 
-1. **Predicted centipawn loss** — Higher predicted CPL raises the temperature (the model predicts the player is likely to make a suboptimal move in this position).
-2. **Blunder probability** — Higher blunder probability adds more noise.
-3. **Player rating** — Lower-rated players get higher temperatures (mapping 600–2800 ELO to ~1.5–0.3 temperature).
-4. **Style sliders** — User-adjustable controls for aggression (boosts captures/checks), risk-taking (scales temperature), and blunder frequency (raises temperature).
+1. **Blind spot biases** — Position-aware logit adjustments that model specific cognitive errors (see below).
+2. **Temperature scaling** — Modulates randomness among candidate moves based on rating, predicted error, style, and time pressure.
+3. **Nucleus (top-p) sampling** — Eliminates garbage moves from the distribution tail while preserving structured human errors.
 
-The temperature formula:
+The temperature formula (ceiling 1.0 — blind spots and top-p handle error modeling):
 
 ```python
-base_temp = max(0.3, 1.8 - rating / 2000.0)       # rating component
-error_temp = 0.5 * predicted_cpl + 0.3 * blunder_prob  # error component
-temperature = (base_temp + error_temp * 0.5) * (0.5 + risk/100) * (0.7 + 0.6 * blunder/100)
-temperature = clamp(temperature, 0.1, 3.0)
+base_temp = max(0.3, 0.95 - rating / 4000.0)                    # rating component
+error_temp = 0.2 * predicted_cpl + 0.1 * blunder_prob            # error component
+temperature = (base_temp + error_temp * 0.2) * style_factors
+temperature *= (1.0 + 0.5 * time_pressure)                       # time trouble
+temperature = clamp(temperature, 0.25, 1.0)
 ```
 
 Additionally, the aggression slider applies a logit bias to captures and checks before sampling:
@@ -264,21 +267,87 @@ if is_capture(move):  logits[idx] += aggression_boost * 1.5
 if gives_check(move): logits[idx] += aggression_boost * 1.0
 ```
 
-This produces realistic human play: a 2400-rated model plays almost engine-like (low temperature, near-argmax), while a 1000-rated model occasionally blunders, prefers familiar patterns, and shows style-specific tendencies.
+This produces realistic human play: a 2400-rated model plays almost engine-like (low temperature, tight nucleus), while a 1000-rated model occasionally falls for traps, grabs poisoned material, and shows style-specific tendencies — but never makes random queen shuffles.
 
 **Implementation:** [ml/src/inference/sampler.py](ml/src/inference/sampler.py)
 
+### Blind Spot Biases
+
+Instead of relying solely on temperature to produce human-like mistakes, the system applies **position-aware biases** that model specific cognitive blind spots common in human chess players. Each bias operates on the logit distribution *before* temperature scaling and nucleus filtering:
+
+| Bias | Effect | Strength Scaling |
+|------|--------|-----------------|
+| **Tactical blindness** | Penalizes quiet engine-best moves and discovered attacks that humans routinely miss | `weakness × 0.8` |
+| **Material greed** | Boosts captures proportional to piece value, especially undefended pieces | `weakness × 0.6 + 0.1` |
+| **Check attraction** | Boosts checks even when they waste tempo — "patzer sees a check, patzer gives a check" | `weakness × 0.5 + 0.05` |
+| **Piece preference** | Biases toward queen moves and central knight hops, away from rook moves | `weakness × 0.3` |
+| **King safety neglect** | Penalizes non-castling moves when castling is available; deprioritizes prophylactic pawn moves | `weakness × 0.5` |
+| **Long-range blindness** | Penalizes long-distance slider moves (4+ squares) that are engine-best — humans miss long diagonals | `weakness × 0.7` |
+| **King attack neglect** | Penalizes retreating pieces away from the enemy king when 3+ attackers have pressure on the king zone | `weakness × 0.6` |
+
+The `weakness` factor is derived from rating: `max(0, (2400 - rating) / 1800)`. A 600-rated player has weakness ~1.0 (strong blind spots), while a 2400+ player has weakness ~0.0.
+
+Bias magnitudes are tuned to be strong enough to push human-like bad moves *into* the nucleus sampling threshold while garbage moves remain outside.
+
+**Implementation:** [ml/src/inference/blind_spots.py](ml/src/inference/blind_spots.py)
+
+### Nucleus (Top-P) Sampling
+
+The system uses **nucleus sampling** (the same technique used by GPT and Claude) to eliminate random garbage moves from the tail of the probability distribution. After temperature scaling produces a softmax distribution, nucleus sampling:
+
+1. Sorts moves by probability descending
+2. Keeps only the smallest set of moves whose cumulative probability exceeds a threshold (top-p)
+3. Zeros out everything else and renormalizes
+
+The top-p threshold scales with rating:
+
+| Rating | Top-p | Approximate Candidate Moves |
+|--------|-------|---------------------------|
+| 400 | 0.97 | 15–20 |
+| 1000 | 0.95 | 10–15 |
+| 1500 | 0.92 | 7–10 |
+| 2000 | 0.88 | 5–7 |
+| 2500 | 0.82 | 3–5 |
+
+An additional **0.3% probability floor** ensures no move with less than 1-in-300 probability can be sampled, even if it falls within the nucleus.
+
+**Why this matters:** With pure temperature sampling, a position with 50 legal moves at temperature 1.0 gives each tail move ~0.05% probability individually — but collectively the 30+ garbage moves have ~1.5% total probability per position. Over a 30-move game, that's ~3 random-feeling blunders. Nucleus sampling eliminates this entirely while preserving blind-spot-boosted human-like mistakes.
+
+**Implementation:** [ml/src/inference/sampler.py](ml/src/inference/sampler.py)
+
+### Lichess Opening Explorer Integration
+
+When no trained model checkpoint is available, the system queries the **Lichess Opening Explorer API** for real human move distributions. This provides statistically grounded move choices based on millions of actual games.
+
+The data source priority (4-tier fallback):
+
+1. **Player-specific explorer stats** — If the opponent is a Lichess player, query their personal move history for the current position via the `/player` endpoint.
+2. **Opening book** — Per-player opening book built from fetched games, giving exact move probabilities from their game history.
+3. **Rating-bracket explorer** — Aggregate human move statistics from the Lichess explorer, filtered by the closest rating bracket (e.g., 1600–1800 games).
+4. **Stockfish fallback** — For positions not in any explorer database, build logits from Stockfish analysis with piece-type-weighted gaps.
+
+Explorer-sourced data uses lighter sampling (reduced CPL/blunder estimates, blind spots disabled) since the move distributions are already realistic. Stockfish fallback applies the full blind spot system.
+
+**Implementation:** [ml/src/data/lichess_explorer.py](ml/src/data/lichess_explorer.py), [ml/src/inference/pipeline.py](ml/src/inference/pipeline.py)
+
 ### Stockfish Fallback (No Checkpoint Mode)
 
-When no trained model checkpoint is available, the system does **not** play random moves. Instead, it builds a realistic policy distribution from Stockfish analysis:
+When no trained model checkpoint is available and the position is not in any explorer database, the system builds a realistic policy distribution from Stockfish analysis:
 
-1. **Engine-based logits**: Stockfish's top moves receive high logits (5.0 for the best move, decaying by rank and centipawn difference). All other legal moves get a small base logit (-1.0 + noise) so they aren't completely impossible.
+1. **Engine-based logits**: Stockfish's top moves receive high logits (5.0 for the best move, decaying by rank and centipawn difference). Non-engine moves get piece-type-weighted logits with wide gaps to separate reasonable from garbage:
+   - Pawns: -2.0 to -3.0 (depending on centrality)
+   - Knights: -3.0 to -4.0 (center vs rim)
+   - Bishops: -5.0
+   - Rooks: -7.0
+   - Queens: -8.0
+   - King (non-castling): -10.0
+   - Castling: -0.5
+
 2. **Rating-calibrated error**: CPL and blunder probability are estimated from the target rating:
    - CPL: `max(0.0, 3.0 - rating × 0.0012)` (~1.8 at 1000, ~0.6 at 2000)
    - Blunder: `max(0.02, 0.35 - rating × 0.00012)` (~23% at 1000, ~11% at 2000)
-3. **Same skill-aware sampler**: These synthetic logits are fed through the same temperature-based sampling pipeline, so all rating and style controls work identically to the trained model path.
 
-This means the system produces reasonable, skill-appropriate play from the first launch — a 2500-rated opponent plays near-engine moves while a 1000-rated opponent makes realistic mistakes.
+3. **Full sampling pipeline**: These logits pass through blind spots → temperature → nucleus sampling → probability floor, so all rating and style controls work identically to the trained model path.
 
 **Implementation:** [ml/src/inference/pipeline.py](ml/src/inference/pipeline.py)
 
@@ -583,11 +652,14 @@ Internal service — the Node.js gateway is the only expected consumer.
   "move_history": ["e2e4"],
   "player_id": 0,
   "player_rating": 1500.0,
+  "player_key": "lichess:DrNykterstein",
   "style_overrides": {
     "aggression": 70,
     "risk_taking": 50,
     "blunder_frequency": 30
-  }
+  },
+  "time_remaining": 180.0,
+  "time_control_initial": 300.0
 }
 ```
 
@@ -649,24 +721,49 @@ curl http://localhost:3000/api/simulate/<session_id>
 
 ## Frontend Features
 
-The React frontend uses a **two-phase game flow**:
+The React frontend (Vite + Tailwind CSS + Zustand) features a dark-themed UI with five game modes accessible from the Welcome Screen:
+
+### Welcome Screen
+Three mode cards with descriptions and icons:
+- **Play a Game** — Full setup flow with opponent selection and time controls.
+- **Replay a Famous Game** — Step through iconic games and fork into "what if" scenarios.
+- **Practice Openings** — Drill specific opening lines against AI at any rating.
 
 ### Setup Screen
 - **Color Selection** — Choose to play as White or Black before the game starts.
 - **Opponent Configuration** — Three tabs for selecting your opponent:
-  - **Player Profile** — Search for a real Lichess/Chess.com player and play against their modeled style.
-  - **By Rating** — Select a target ELO (600–2800) to play against a generic opponent of that skill level.
+  - **Player Profile** — Search for a real Lichess/Chess.com player. Ratings are fetched from the platform's profile API (authoritative current rating, not PGN headers).
+  - **By Rating** — Select a target ELO (400–2800) to play against a generic opponent of that skill level.
   - **Custom Style** — Fine-tune aggression, risk-taking, and blunder frequency sliders to craft a specific play style.
+- **Time Control** — Choose from 8 presets (No Clock, 1+0 Bullet through 15+10 Rapid). Time controls affect AI think time and decision quality under pressure.
 
 ### Game Screen
-- **Interactive Chessboard** — Fixed 560px drag-and-drop board using `react-chessboard`, oriented based on your chosen color. SVG arrow overlays show engine best move (blue) and model prediction (green).
-- **Auto-Predict** — After you make a move, the opponent automatically responds — no manual "Predict Move" button needed.
-- **Evaluation Bar** — Vertical bar showing the Stockfish position evaluation.
+- **Interactive Chessboard** — Responsive drag-and-drop board (320–640px) using `react-chessboard`, oriented based on your chosen color. SVG arrow overlays show engine best move (blue) and model prediction (green). Full promotion support with piece selection dialog.
+- **Game Clocks** — When a time control is selected, clocks appear next to each player label. Visual states change at <30s (amber) and <10s (red pulse). The AI's remaining time is sent with prediction requests so the ML service can model time pressure.
+- **Auto-Predict** — After you make a move, the opponent responds automatically with realistic think time scaled to the time control (bullet: 0.2–0.7s, blitz: 0.5–2.5s, rapid: 1–5s, classical: 2–10s). Think time decreases further when the AI is low on time.
+- **Evaluation Bar** — Toggleable vertical bar showing the Stockfish position evaluation, updated after each move.
+- **Evaluation Graph** — Toggleable line graph showing evaluation history across the game (advantage swings over time).
 - **Analysis Panel** — Shows prediction confidence, sampling temperature, centipawn loss, blunder probability, move distribution chart (Recharts), and human-readable explanations for move choices.
+- **Style Panel** — In-game adjustable style sliders (aggression, risk-taking, blunder rate) accessible from the header.
 - **Error Handling** — Graceful error banners when the ML service is unreachable, with a retry button. Predictions stop retrying on connection failure to avoid spam.
-- **Game Controls** — Undo, reset, and game-over detection.
-- **Move List** — Scrollable, clickable list of game moves.
+- **Game Controls** — Undo, reset, and game-over detection with modal.
+- **Move List** — Scrollable, clickable move list with move navigation. Click any move to view that position on the board (turn indicator updates correctly when viewing history).
 - **Opponent Badge** — Compact display of the current opponent's profile in the game header.
+
+### Opening Practice Mode
+- **Opening Browser** — Browse 29 major openings organized by category (1.e4, 1.d4, Other) with ECO codes.
+- **Preview Board** — See the final position of each opening before starting.
+- **Settings** — Choose which color to practice as and the opponent rating (400–2800).
+- **Seamless Transition** — Opening moves are pre-applied to the game board, then normal play continues against the AI.
+
+### Replay Mode
+- **Famous Games** — Step through classic games move by move.
+- **Fork & Explore** — Fork at any point and play out "what if" scenarios where the AI takes over as either side.
+
+### Player Profile Display
+- **Style Visualization** — Bar chart showing Aggression, Tactical tendency, Accuracy, Consistency, and Opening Variety.
+- **Accuracy Handling** — When Stockfish analysis is unavailable, accuracy displays "—" instead of a misleading default value.
+- **Preferred Openings** — Tag cloud showing the player's most-played openings with percentages.
 
 ---
 
@@ -751,6 +848,8 @@ move-predictor/
 │   │   │   ├── feature_extraction.py # Position → training features
 │   │   │   ├── dataset.py           # PyTorch Dataset + HDF5 I/O
 │   │   │   ├── player_stats.py      # 25-feature player statistics
+│   │   │   ├── opening_book.py      # Per-player opening book (trie)
+│   │   │   ├── lichess_explorer.py  # Lichess Opening Explorer API client
 │   │   │   └── sources/             # API clients
 │   │   │       ├── lichess.py       # Lichess API (streaming)
 │   │   │       ├── chesscom.py      # Chess.com API (archives)
@@ -760,8 +859,9 @@ move-predictor/
 │   │   │   ├── losses.py            # Multi-task loss (CE+MSE+BCE)
 │   │   │   └── eval_metrics.py      # Top-k accuracy, AUC, MAE
 │   │   ├── inference/               # Prediction pipeline
-│   │   │   ├── pipeline.py          # End-to-end predict
-│   │   │   ├── sampler.py           # Skill-aware temperature sampling
+│   │   │   ├── pipeline.py          # End-to-end predict (4-tier data source)
+│   │   │   ├── sampler.py           # Nucleus sampling + temperature + style
+│   │   │   ├── blind_spots.py       # 7 cognitive blind spot biases
 │   │   │   └── explainability.py    # Deviation explanations
 │   │   └── db/                      # Database layer
 │   │       ├── models.py            # SQLAlchemy ORM (Player, Game, Run)
@@ -769,14 +869,18 @@ move-predictor/
 │   │       └── crud.py              # CRUD operations
 │   ├── scripts/
 │   │   ├── download_stockfish.sh    # Platform-aware Stockfish installer
+│   │   ├── download_lichess_data.py # Bulk Lichess monthly dump downloader
 │   │   ├── fetch_lichess_data.py    # CLI: fetch games by username
-│   │   ├── preprocess_corpus.py     # CLI: PGN → HDF5
-│   │   └── train.py                 # CLI: training entrypoint
+│   │   ├── preprocess_corpus.py     # CLI: PGN → HDF5 (per-game split)
+│   │   ├── train.py                 # CLI: training entrypoint
+│   │   ├── train_rating_bracket.sh  # Train one rating bracket
+│   │   └── train_all_brackets.sh    # Train all 9 rating brackets
 │   └── tests/
 │       ├── conftest.py              # Shared fixtures
 │       ├── test_move_encoding.py    # Encoding roundtrip tests
 │       ├── test_preprocessing.py    # Board tensor correctness
-│       └── test_model.py            # Forward pass shape tests
+│       ├── test_model.py            # Forward pass shape tests
+│       └── test_sampler.py          # Sampling, temperature, nucleus tests
 │
 ├── backend/                         # Node.js API gateway
 │   ├── Dockerfile
@@ -810,36 +914,54 @@ move-predictor/
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx                 # React + QueryClient entry
-│       ├── App.tsx                  # Two-phase flow (setup → game)
+│       ├── App.tsx                  # Multi-phase flow (welcome → setup → game/replay/practice)
+│       ├── vite-env.d.ts            # Vite type declarations
 │       ├── api/
 │       │   └── client.ts           # Axios API wrapper
+│       ├── data/
+│       │   └── openings.ts         # 29 opening definitions (ECO, moves, descriptions)
 │       ├── store/
-│       │   ├── gameStore.ts         # Chess state + player color (Zustand)
-│       │   └── playerStore.ts       # Player + style state
+│       │   ├── gameStore.ts         # Chess state + time control + opening practice (Zustand)
+│       │   ├── playerStore.ts       # Player + style state
+│       │   └── replayStore.ts       # Replay mode state + forking
 │       ├── hooks/
 │       │   ├── useChessGame.ts      # Board interaction hook
-│       │   ├── usePrediction.ts     # Auto-prediction with error handling
-│       │   └── usePlayerProfile.ts  # Player profile hook
+│       │   ├── usePrediction.ts     # Auto-prediction with time control
+│       │   ├── usePlayerProfile.ts  # Player profile hook
+│       │   ├── useEvaluation.ts     # Position evaluation hook
+│       │   ├── useSoundEffects.ts   # Move/capture sound effects
+│       │   └── useKeyboardShortcuts.ts  # Keyboard navigation
 │       ├── components/
+│       │   ├── Welcome/
+│       │   │   └── WelcomeScreen.tsx  # Mode selection (Play, Replay, Practice)
 │       │   ├── Setup/
-│       │   │   └── SetupScreen.tsx  # Pre-game config (color, opponent)
+│       │   │   └── SetupScreen.tsx  # Pre-game config (color, opponent, time control)
 │       │   ├── Board/
-│       │   │   ├── ChessBoard.tsx   # Fixed 560px board + orientation
-│       │   │   └── EvalBar.tsx      # Vertical eval indicator
+│       │   │   ├── ChessBoard.tsx   # Responsive board + clocks + arrows
+│       │   │   ├── GameClock.tsx    # Chess clock with visual time states
+│       │   │   ├── EvalBar.tsx      # Vertical eval indicator
+│       │   │   ├── EvalGraph.tsx    # Eval history line graph
+│       │   │   └── CapturedPieces.tsx # Material difference display
 │       │   ├── Game/
-│       │   │   ├── GameScreen.tsx    # Main game layout + auto-predict
+│       │   │   ├── GameScreen.tsx    # Main game layout + auto-predict + realistic think time
 │       │   │   ├── GameControls.tsx  # Undo, reset controls
+│       │   │   ├── GameOverModal.tsx # Game over dialog
 │       │   │   ├── GameImport.tsx    # Username fetch + PGN upload
-│       │   │   └── MoveList.tsx      # Scrollable move pairs
+│       │   │   └── MoveList.tsx      # Scrollable, clickable move pairs
 │       │   ├── Player/
 │       │   │   ├── PlayerSearch.tsx   # Username search input
-│       │   │   ├── PlayerProfile.tsx  # Style bar visualization
+│       │   │   ├── PlayerProfile.tsx  # Style bar visualization (handles unavailable stats)
 │       │   │   ├── StyleSliders.tsx   # Aggression/risk/blunder
+│       │   │   ├── StylePanel.tsx     # In-game style adjustment
 │       │   │   └── OpponentBadge.tsx  # Compact opponent display
 │       │   ├── Prediction/
 │       │   │   ├── PredictionPanel.tsx  # Main prediction display
 │       │   │   ├── MoveDistribution.tsx # Bar chart (Recharts)
 │       │   │   └── Explainability.tsx   # Deviation reasoning
+│       │   ├── Practice/
+│       │   │   └── PracticeScreen.tsx   # Opening browser + preview board + settings
+│       │   ├── Replay/
+│       │   │   └── ReplayScreen.tsx     # Step-through + fork + AI takeover
 │       │   ├── Simulation/
 │       │   │   ├── SimulationBoard.tsx  # Play-against-AI board
 │       │   │   └── SimulationControls.tsx
@@ -875,6 +997,8 @@ The test suite covers:
 - **Board representation** (`test_preprocessing.py`): Verifies the tensor shape is (18, 8, 8) float32, that known positions produce expected values (e.g., 8 white pawns on rank 1, king on e1), that the side-to-move channel is consistent after flipping, that castling rights encode correctly, that en passant squares are marked, and that the halfmove clock normalizes properly.
 
 - **Model forward pass** (`test_model.py`): Verifies output shapes for each sub-module (board encoder, sequence encoder, player embedding, fusion, all three heads) and the fully assembled model. Confirms probabilities sum to 1.0, value output is in [-1, 1], and parameter counting works. Tests the three-phase freezing strategy.
+
+- **Sampling pipeline** (`test_sampler.py`): 21 tests covering temperature computation (rating scaling, style overrides, ceiling/floor clamping), move sampling (legal moves, UCI validity, probability bounds, opening book integration, multi-position robustness), style biases (aggression boost), eval perspective flipping, and nucleus sampling (no random queen moves at rating 400 over 100 samples, temperature never exceeds 1.0, top-p rating scaling, tail removal verification).
 
 ### Backend Tests
 
@@ -943,11 +1067,10 @@ Behavioral tests also verify that:
 
 ## Future Improvements
 
-- **Bulk data processing**: Download Lichess monthly database dumps (.zst format, ~80M games/month) for Phase 1 pretraining at scale, parallelizing Stockfish annotation across 16+ CPU cores.
-- **Opening book integration**: Overlay a learned opening book to improve prediction accuracy in the first 10-15 moves where humans follow memorized lines.
-- **Time pressure modeling**: Incorporate remaining clock time (available in Lichess data) as an input feature to model how play degrades under time pressure.
 - **Elo-conditioned generation**: Train a single model that conditions on an explicit ELO input (similar to Maia-2's skill-aware approach) rather than learning separate per-player embeddings, enabling instant simulation at any rating without fine-tuning.
 - **MCTS hybrid**: For higher-quality predictions, combine the neural policy with a lightweight search (100-200 nodes) to improve accuracy while maintaining human-like play.
 - **WebSocket support**: Replace polling with WebSocket connections for real-time move updates during simulation games.
 - **Model distillation**: Distill the full model into a smaller student network (<2M parameters) for client-side inference via ONNX.js, eliminating server round-trips.
 - **Tournament mode**: Support multi-game matches with per-game statistics, tracking how the simulated opponent adapts (or doesn't) across games.
+- **Endgame tablebase**: Integrate Syzygy tablebases for perfect endgame play, transitioning from human-like to engine-correct when the position is fully solved.
+- **Adaptive difficulty**: Dynamically adjust the simulated opponent's rating during a game based on the player's performance, creating a more engaging experience.
