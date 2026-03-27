@@ -28,7 +28,7 @@ export function PlayerProfile() {
         <div className="space-y-2">
           <StyleBar label="Aggression" value={style.aggression} color="blunder" />
           <StyleBar label="Tactical" value={style.tactical} color="inaccuracy" />
-          <StyleBar label="Accuracy" value={style.accuracy} color="human" />
+          <StyleBar label="Accuracy" value={style.accuracy} color="human" unavailable={style.accuracy < 0} />
           <StyleBar label="Consistency" value={style.consistency} color="engine" />
           <StyleBar label="Opening Variety" value={style.opening_diversity} color="gold" />
         </div>
@@ -57,10 +57,12 @@ function StyleBar({
   label,
   value,
   color,
+  unavailable = false,
 }: {
   label: string;
   value: number;
   color: string;
+  unavailable?: boolean;
 }) {
   const colorMap: Record<string, string> = {
     blunder: "bg-blunder/60",
@@ -74,13 +76,15 @@ function StyleBar({
     <div>
       <div className="flex justify-between text-[10px] mb-0.5">
         <span className="text-zinc-500 font-medium">{label}</span>
-        <span className="text-zinc-400 font-mono">{value}</span>
+        <span className="text-zinc-400 font-mono">{unavailable ? "—" : value}</span>
       </div>
       <div className="h-1 bg-white/[0.04] rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${colorMap[color] || "bg-blue-500/60"}`}
-          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-        />
+        {!unavailable && (
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${colorMap[color] || "bg-blue-500/60"}`}
+            style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+          />
+        )}
       </div>
     </div>
   );

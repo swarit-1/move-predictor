@@ -10,15 +10,28 @@ interface Props {
   onBack?: () => void;
 }
 
+const TIME_CONTROLS = [
+  { label: "No Clock", initial: 0, increment: 0 },
+  { label: "1+0", initial: 60, increment: 0 },
+  { label: "3+0", initial: 180, increment: 0 },
+  { label: "3+2", initial: 180, increment: 2 },
+  { label: "5+0", initial: 300, increment: 0 },
+  { label: "5+3", initial: 300, increment: 3 },
+  { label: "10+0", initial: 600, increment: 0 },
+  { label: "15+10", initial: 900, increment: 10 },
+];
+
 export function SetupScreen({ onStart, onBack }: Props) {
   const [activeTab, setActiveTab] = useState<OpponentTab>("rating");
   const [source, setSource] = useState<"lichess" | "chesscom">("lichess");
   const [username, setUsername] = useState("");
   const [manualRating, setManualRating] = useState(1500);
+  const [selectedTC, setSelectedTC] = useState(0); // index into TIME_CONTROLS
   const playerColor = useGameStore((s) => s.playerColor);
   const setPlayerColor = useGameStore((s) => s.setPlayerColor);
   const showEvalBar = useGameStore((s) => s.showEvalBar);
   const setShowEvalBar = useGameStore((s) => s.setShowEvalBar);
+  const setTimeControl = useGameStore((s) => s.setTimeControl);
   const { styleOverrides, setStyleOverride, resetStyleOverrides } =
     usePlayerStore();
   const { opponent, opponentLoading, error, fetchProfile } =
@@ -49,6 +62,10 @@ export function SetupScreen({ onStart, onBack }: Props) {
         styleSummary: null,
       });
     }
+    // Set time control
+    const tc = TIME_CONTROLS[selectedTC];
+    setTimeControl(tc.initial > 0 ? { initial: tc.initial, increment: tc.increment } : null);
+
     onStart();
   };
 
@@ -191,6 +208,28 @@ export function SetupScreen({ onStart, onBack }: Props) {
                 resetStyleOverrides={resetStyleOverrides}
               />
             )}
+          </div>
+
+          {/* Time control */}
+          <div className="px-6 pb-4">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-[0.15em] font-medium mb-2.5">
+              Time Control
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {TIME_CONTROLS.map((tc, i) => (
+                <button
+                  key={tc.label}
+                  onClick={() => setSelectedTC(i)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                    selectedTC === i
+                      ? "bg-white/[0.08] text-white ring-1 ring-white/[0.12]"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]"
+                  }`}
+                >
+                  {tc.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Start button */}

@@ -56,6 +56,7 @@ def compute_temperature(
     blunder_prob: float,
     player_rating: float = 1500.0,
     style: StyleOverrides | None = None,
+    time_pressure: float = 0.0,
 ) -> float:
     """Compute sampling temperature based on predicted error and player skill.
 
@@ -71,6 +72,7 @@ def compute_temperature(
         blunder_prob: Model's predicted blunder probability.
         player_rating: Player's rating.
         style: Optional style overrides.
+        time_pressure: 0.0 (no pressure) to 1.0 (extreme time pressure).
 
     Returns:
         Temperature value (typically 0.2 to 1.5).
@@ -93,6 +95,10 @@ def compute_temperature(
     temperature = rating_temp + error_temp * 0.3
     temperature *= (0.6 + 0.8 * risk_factor)  # risk slider scales temperature
     temperature *= (0.8 + 0.4 * blunder_factor)  # blunder slider (reduced impact)
+
+    # Time pressure increases temperature (more errors under time trouble)
+    if time_pressure > 0:
+        temperature *= (1.0 + 0.5 * time_pressure)
 
     # Tighter clamp — blind spots do the error work, temperature just adds variance
     return max(0.2, min(1.5, temperature))
@@ -152,6 +158,7 @@ def sample_move(
     engine_top_moves: list[dict] | None = None,
     opening_book_probs: dict[str, float] | None = None,
     apply_blind_spots: bool = True,
+    time_pressure: float = 0.0,
 ) -> SampledMove:
     """Sample a move using blind spot biases + temperature scaling.
 
@@ -209,7 +216,7 @@ def sample_move(
     logits[~legal_mask] = float("-inf")
 
     # Compute temperature
-    temperature = compute_temperature(predicted_cpl, blunder_prob, player_rating, style)
+    temperature = compute_temperature(predicted_cpl, blunder_prob, player_rating, style, time_pressure)
 
     # Apply temperature and sample
     scaled_logits = logits / temperature

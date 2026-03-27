@@ -5,7 +5,11 @@ Computes accuracy, KL divergence, and other metrics for the move predictor.
 
 import torch
 import numpy as np
-from sklearn.metrics import roc_auc_score
+
+try:
+    from sklearn.metrics import roc_auc_score
+except ImportError:
+    roc_auc_score = None
 
 
 class MetricsTracker:
@@ -78,7 +82,7 @@ class MetricsTracker:
         if self._value_errors:
             metrics["value_mae"] = float(np.mean(self._value_errors))
 
-        if self._blunder_preds and len(set(self._blunder_targets)) > 1:
+        if self._blunder_preds and len(set(self._blunder_targets)) > 1 and roc_auc_score is not None:
             try:
                 metrics["blunder_auc"] = roc_auc_score(
                     self._blunder_targets, self._blunder_preds

@@ -55,6 +55,14 @@ interface GameState {
   // Track current viewing position vs full history for move navigation
   viewIndex: number; // -1 = latest position
 
+  // Opening practice — pre-loaded moves to apply on game start
+  pendingOpeningMoves: string[] | null;
+
+  // Time control
+  timeControl: { initial: number; increment: number } | null;
+  playerTimeLeft: number;
+  opponentTimeLeft: number;
+
   setFen: (fen: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
   applyPredictedMove: (moveUci: string) => boolean;
@@ -73,6 +81,11 @@ interface GameState {
   loadPgn: (pgn: string) => void;
   goToMove: (moveIndex: number) => void;
   goToLatest: () => void;
+  setPendingOpeningMoves: (moves: string[] | null) => void;
+  applyPendingOpening: () => void;
+  setTimeControl: (tc: { initial: number; increment: number } | null) => void;
+  tickClock: (side: "player" | "opponent", elapsed: number) => void;
+  addIncrement: (side: "player" | "opponent") => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -91,6 +104,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   mode: "analyze",
   simulationSessionId: null,
   viewIndex: -1,
+  pendingOpeningMoves: null,
+  timeControl: null,
+  playerTimeLeft: 0,
+  opponentTimeLeft: 0,
 
   setFen: (fen) => {
     const chess = new Chess(fen);
@@ -221,5 +238,57 @@ export const useGameStore = create<GameState>((set, get) => ({
       fen: chess.fen(),
       viewIndex: -1,
     });
+  },
+
+  setPendingOpeningMoves: (moves) => set({ pendingOpeningMoves: moves }),
+
+  applyPendingOpening: () => {
+    const moves = get().pendingOpeningMoves;
+    if (!moves || moves.length === 0) return;
+
+    const chess = get().chess;
+    const moveHistory: string[] = [];
+
+    for (const san of moves) {
+      try {
+        const result = chess.move(san);
+        if (result) {
+          moveHistory.push(result.lan);
+        }
+      } catch {
+        break;
+      }
+    }
+
+    set({
+      fen: chess.fen(),
+      moveHistory: [...get().moveHistory, ...moveHistory],
+      pgn: chess.pgn(),
+      pendingOpeningMoves: null,
+    });
+  },
+
+  setTimeControl: (tc) => set({
+    timeControl: tc,
+    playerTimeLeft: tc?.initial ?? 0,
+    opponentTimeLeft: tc?.initial ?? 0,
+  }),
+
+  tickClock: (side, elapsed) => {
+    if (side === "player") {
+      set((s) => ({ playerTimeLeft: Math.max(0, s.playerTimeLeft - elapsed) }));
+    } else {
+      set((s) => ({ opponentTimeLeft: Math.max(0, s.opponentTimeLeft - elapsed) }));
+    }
+  },
+
+  addIncrement: (side) => {
+    const tc = get().timeControl;
+    if (!tc) return;
+    if (side === "player") {
+      set((s) => ({ playerTimeLeft: s.playerTimeLeft + tc.increment }));
+    } else {
+      set((s) => ({ opponentTimeLeft: s.opponentTimeLeft + tc.increment }));
+    }
   },
 }));

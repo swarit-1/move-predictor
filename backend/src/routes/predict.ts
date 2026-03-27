@@ -67,6 +67,8 @@ const predictSchema = z.object({
       blunder_frequency: z.number().min(0).max(100).optional(),
     })
     .optional(),
+  time_remaining: z.number().min(0).optional(),
+  time_control_initial: z.number().min(0).optional(),
 });
 
 const analyzeSchema = z.object({
@@ -94,6 +96,8 @@ predictRouter.post("/", async (req: Request, res: Response) => {
       player_rating: params.player_rating,
       player_key: params.player_key,
       style_overrides: params.style_overrides,
+      time_remaining: params.time_remaining,
+      time_control_initial: params.time_control_initial,
     });
 
     res.json({ success: true, data: prediction });

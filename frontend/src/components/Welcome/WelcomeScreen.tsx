@@ -1,9 +1,10 @@
 interface Props {
   onPlay: () => void;
   onReplay: () => void;
+  onPractice: () => void;
 }
 
-export function WelcomeScreen({ onPlay, onReplay }: Props) {
+export function WelcomeScreen({ onPlay, onReplay, onPractice }: Props) {
   return (
     <div className="min-h-screen bg-surface-0 flex items-center justify-center p-6">
       <div className="w-full max-w-xl animate-fade-in">
@@ -68,6 +69,31 @@ export function WelcomeScreen({ onPlay, onReplay }: Props) {
                 <p className="text-xs text-zinc-500 mt-1 font-light leading-relaxed">
                   Step through iconic games move by move. Fork at any point and explore
                   "what if" scenarios where the AI plays as either side.
+                </p>
+              </div>
+              <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 group-hover:translate-x-0.5 transition-all mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </div>
+          </button>
+
+          <button
+            onClick={onPractice}
+            className="w-full glass-card glass-card-hover p-5 text-left group"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/[0.08] flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                  Practice Openings
+                </h3>
+                <p className="text-xs text-zinc-500 mt-1 font-light leading-relaxed">
+                  Drill specific opening lines against opponents at any rating level.
+                  Choose from 30+ major systems across all categories.
                 </p>
               </div>
               <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 group-hover:translate-x-0.5 transition-all mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

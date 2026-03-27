@@ -21,7 +21,9 @@ export function useChessGame() {
   );
 
   const isGameOver = chess.isGameOver();
-  const turn = chess.turn() === "w" ? "white" : "black";
+  // Derive turn from fen (not chess instance) so it's correct when viewing history
+  const fenTurn = fen.split(" ")[1];
+  const turn = fenTurn === "b" ? "black" : "white";
   const inCheck = chess.inCheck();
 
   return {

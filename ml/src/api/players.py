@@ -41,15 +41,40 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
     """
     from src.data.player_stats import compute_stats_from_pgns
 
-    # Fetch games based on source
-    pgn_texts = []
+    # Get authoritative rating from profile API FIRST
+    authoritative_rating: float | None = None
+    pgn_texts: list[str] = []
 
     if request.source == "lichess":
-        from src.data.sources.lichess import fetch_player_games
+        from src.data.sources.lichess import fetch_player_profile, fetch_player_games
+
+        try:
+            profile = await fetch_player_profile(request.username)
+            perfs = profile.get("perfs", {})
+            for game_type in ["blitz", "rapid", "classical", "bullet"]:
+                if game_type in perfs and "rating" in perfs[game_type]:
+                    authoritative_rating = float(perfs[game_type]["rating"])
+                    break
+        except Exception as e:
+            logger.warning("Failed to fetch Lichess profile for %s: %s", request.username, e)
+
         async for pgn in fetch_player_games(request.username, max_games=request.max_games):
             pgn_texts.append(pgn)
+
     elif request.source == "chesscom":
-        from src.data.sources.chesscom import fetch_player_games
+        from src.data.sources.chesscom import fetch_player_stats, fetch_player_games
+
+        try:
+            chess_stats = await fetch_player_stats(request.username)
+            for game_type in ["chess_blitz", "chess_rapid", "chess_bullet", "chess_daily"]:
+                if game_type in chess_stats:
+                    rating_data = chess_stats[game_type].get("last", {})
+                    if "rating" in rating_data:
+                        authoritative_rating = float(rating_data["rating"])
+                        break
+        except Exception as e:
+            logger.warning("Failed to fetch Chess.com stats for %s: %s", request.username, e)
+
         async for pgn in fetch_player_games(request.username, max_games=request.max_games):
             pgn_texts.append(pgn)
     else:
@@ -58,14 +83,24 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
     if not pgn_texts:
         raise HTTPException(status_code=404, detail=f"No games found for {request.username}")
 
-    # Compute stats
+    # Compute stats from games
     stats = compute_stats_from_pgns(pgn_texts, request.username)
 
+    # Override PGN-derived rating with authoritative API rating
+    if authoritative_rating is not None:
+        stats.rating = authoritative_rating
+
     # Build style summary
+    # Accuracy requires Stockfish analysis — mark as -1 when using default CPL
+    accuracy = (
+        round(max(0, 100 - stats.avg_centipawn_loss))
+        if stats.avg_centipawn_loss != 50.0
+        else -1
+    )
     style_summary = {
         "aggression": round(stats.aggression_index * 100),
         "tactical": round(stats.tactical_tendency * 100),
-        "accuracy": round(max(0, 100 - stats.avg_centipawn_loss)),
+        "accuracy": accuracy,
         "consistency": round(stats.consistency * 100),
         "opening_diversity": round(stats.opening_diversity * 100),
         "preferred_openings": {

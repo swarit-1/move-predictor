@@ -1,9 +1,10 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { Chessboard } from "react-chessboard";
 import { useChessGame } from "../../hooks/useChessGame";
 import { useGameStore } from "../../store/gameStore";
 import { usePlayerStore } from "../../store/playerStore";
 import { CapturedPieces } from "./CapturedPieces";
+import { GameClock } from "./GameClock";
 import type { Square, Piece } from "react-chessboard/dist/chessboard/types";
 
 const MAX_BOARD_SIZE = 640;
@@ -16,6 +17,10 @@ export function ChessBoard() {
   const playerColor = useGameStore((s) => s.playerColor);
   const viewIndex = useGameStore((s) => s.viewIndex);
   const opponent = usePlayerStore((s) => s.opponent);
+  const timeControl = useGameStore((s) => s.timeControl);
+  const playerTimeLeft = useGameStore((s) => s.playerTimeLeft);
+  const opponentTimeLeft = useGameStore((s) => s.opponentTimeLeft);
+  const tickClock = useGameStore((s) => s.tickClock);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [boardSize, setBoardSize] = useState(MAX_BOARD_SIZE);
@@ -53,6 +58,13 @@ export function ChessBoard() {
 
   const opponentName = opponent?.username ?? "Opponent";
   const isViewingHistory = viewIndex !== -1;
+  const hasClock = timeControl !== null && timeControl.initial > 0;
+  const opponentClockRunning = hasClock && !isPlayerTurn && !isGameOver && !isViewingHistory;
+  const playerClockRunning = hasClock && isPlayerTurn && !isGameOver && !isViewingHistory;
+
+  const onOpponentTick = useCallback((elapsed: number) => tickClock("opponent", elapsed), [tickClock]);
+  const onPlayerTick = useCallback((elapsed: number) => tickClock("player", elapsed), [tickClock]);
+  const onTimeOut = useCallback(() => {}, []);
 
   return (
     <div ref={containerRef} style={{ width: boardSize }}>
@@ -79,6 +91,14 @@ export function ChessBoard() {
           <span className="text-[10px] text-inaccuracy/70 font-medium bg-inaccuracy/[0.06] px-2 py-0.5 rounded-md">
             Viewing history
           </span>
+        )}
+        {hasClock && (
+          <GameClock
+            timeLeft={opponentTimeLeft}
+            isRunning={opponentClockRunning}
+            onTick={onOpponentTick}
+            onTimeOut={onTimeOut}
+          />
         )}
       </div>
 
@@ -139,14 +159,24 @@ export function ChessBoard() {
             Game over
           </span>
         )}
-        {prediction && !isLoading && !isGameOver && viewIndex === -1 && (
-          <span className="text-xs text-zinc-500 font-mono flex items-center gap-1.5">
-            <span className="text-zinc-400">{prediction.move}</span>
-            <span className="text-human/70 font-semibold">
-              {(prediction.probability * 100).toFixed(0)}%
+        <div className="flex items-center gap-2">
+          {prediction && !isLoading && !isGameOver && viewIndex === -1 && (
+            <span className="text-xs text-zinc-500 font-mono flex items-center gap-1.5">
+              <span className="text-zinc-400">{prediction.move}</span>
+              <span className="text-human/70 font-semibold">
+                {(prediction.probability * 100).toFixed(0)}%
+              </span>
             </span>
-          </span>
-        )}
+          )}
+          {hasClock && (
+            <GameClock
+              timeLeft={playerTimeLeft}
+              isRunning={playerClockRunning}
+              onTick={onPlayerTick}
+              onTimeOut={onTimeOut}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

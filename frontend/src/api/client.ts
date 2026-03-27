@@ -39,6 +39,8 @@ export async function predictMove(params: {
   player_rating?: number;
   player_key?: string;
   style_overrides?: { aggression?: number; risk_taking?: number; blunder_frequency?: number };
+  time_remaining?: number;
+  time_control_initial?: number;
 }) {
   const { data } = await api.post("/predict", params);
   return data;

@@ -28,6 +28,11 @@ export function GameScreen({ onBack }: Props) {
   const setShowEvalBar = useGameStore((s) => s.setShowEvalBar);
   const applyPredictedMove = useGameStore((s) => s.applyPredictedMove);
   const prediction = useGameStore((s) => s.prediction);
+  const pendingOpeningMoves = useGameStore((s) => s.pendingOpeningMoves);
+  const applyPendingOpening = useGameStore((s) => s.applyPendingOpening);
+  const timeControl = useGameStore((s) => s.timeControl);
+  const opponentTimeLeft = useGameStore((s) => s.opponentTimeLeft);
+  const addIncrement = useGameStore((s) => s.addIncrement);
   const opponent = usePlayerStore((s) => s.opponent);
   const { fetchPrediction, predictionError, retryPrediction } = usePrediction();
   const prevMoveCountRef = useRef(moveHistory.length);
@@ -40,17 +45,28 @@ export function GameScreen({ onBack }: Props) {
   useSoundEffects();
   useKeyboardShortcuts({ onBack });
 
+  // Apply pending opening moves on mount (from practice mode)
+  useEffect(() => {
+    if (pendingOpeningMoves && pendingOpeningMoves.length > 0) {
+      const timer = setTimeout(() => {
+        applyPendingOpening();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingOpeningMoves, applyPendingOpening]);
+
   // When playing as Black, trigger AI's first move on mount
   useEffect(() => {
     if (
       playerColor === "b" &&
       moveHistory.length === 0 &&
+      !pendingOpeningMoves &&
       !hasTriggeredFirstMove.current
     ) {
       hasTriggeredFirstMove.current = true;
       fetchPrediction();
     }
-  }, [playerColor, moveHistory.length, fetchPrediction]);
+  }, [playerColor, moveHistory.length, pendingOpeningMoves, fetchPrediction]);
 
   // Apply prediction to the board when it arrives (opponent's move)
   useEffect(() => {
@@ -58,13 +74,28 @@ export function GameScreen({ onBack }: Props) {
       const currentTurn = chess.turn();
       const isOpponentTurn = currentTurn !== playerColor;
       if (isOpponentTurn) {
+        // Compute realistic think time based on time control
+        let delay = 300;
+        if (timeControl && timeControl.initial > 0) {
+          const initial = timeControl.initial;
+          if (initial <= 60) delay = 200 + Math.random() * 500;
+          else if (initial <= 300) delay = 500 + Math.random() * 2000;
+          else if (initial <= 900) delay = 1000 + Math.random() * 4000;
+          else delay = 2000 + Math.random() * 8000;
+
+          // Move faster when low on time
+          if (opponentTimeLeft < 30) delay = Math.min(delay, 300 + Math.random() * 500);
+          if (opponentTimeLeft < 10) delay = Math.min(delay, 100 + Math.random() * 200);
+        }
+
         const timer = setTimeout(() => {
           applyPredictedMove(prediction.move);
-        }, 300);
+          if (timeControl) addIncrement("opponent");
+        }, delay);
         return () => clearTimeout(timer);
       }
     }
-  }, [prediction, chess, playerColor, applyPredictedMove]);
+  }, [prediction, chess, playerColor, applyPredictedMove, timeControl, opponentTimeLeft, addIncrement]);
 
   // Auto-predict after the player makes a move
   useEffect(() => {

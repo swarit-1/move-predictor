@@ -73,6 +73,8 @@ class MLClient {
       risk_taking?: number;
       blunder_frequency?: number;
     };
+    time_remaining?: number;
+    time_control_initial?: number;
   }): Promise<PredictionResult> {
     const response = await this.client.post<PredictionResult>("/ml/predict", params);
     return response.data;

@@ -4,7 +4,7 @@ import { usePlayerStore } from "../store/playerStore";
 import { predictMove } from "../api/client";
 
 export function usePrediction() {
-  const { fen, moveHistory, prediction, isLoading, predictionError, setPrediction, setLoading, setPredictionError } =
+  const { fen, moveHistory, prediction, isLoading, predictionError, setPrediction, setLoading, setPredictionError, timeControl, opponentTimeLeft } =
     useGameStore();
   const { opponent, styleOverrides } = usePlayerStore();
 
@@ -33,6 +33,8 @@ export function usePrediction() {
           risk_taking: styleOverrides.risk_taking,
           blunder_frequency: styleOverrides.blunder_frequency,
         },
+        time_remaining: timeControl ? opponentTimeLeft : undefined,
+        time_control_initial: timeControl ? timeControl.initial : undefined,
       });
 
       if (response.success) {
@@ -65,7 +67,7 @@ export function usePrediction() {
     } finally {
       setLoading(false);
     }
-  }, [fen, moveHistory, opponent, styleOverrides, isLoading, predictionError, setPrediction, setLoading, setPredictionError]);
+  }, [fen, moveHistory, opponent, styleOverrides, isLoading, predictionError, setPrediction, setLoading, setPredictionError, timeControl, opponentTimeLeft]);
 
   const retryPrediction = useCallback(() => {
     setPredictionError(null);

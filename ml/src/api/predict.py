@@ -14,6 +14,8 @@ class PredictRequest(BaseModel):
     player_rating: float = 1500.0
     player_key: str | None = None  # source:username for opening book lookup
     style_overrides: dict | None = None  # {aggression, risk_taking, blunder_frequency}
+    time_remaining: float | None = None  # seconds left on opponent's clock
+    time_control_initial: float | None = None  # initial time in seconds
 
 
 class PredictResponse(BaseModel):
@@ -73,6 +75,17 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
     except Exception:
         pass  # Stockfish unavailable — proceed without engine comparison
 
+    # Compute time pressure (0.0 = no pressure, 1.0 = extreme pressure)
+    time_pressure = 0.0
+    if request.time_remaining is not None and request.time_control_initial:
+        ratio = request.time_remaining / request.time_control_initial
+        if ratio < 0.1:
+            time_pressure = 1.0
+        elif ratio < 0.25:
+            time_pressure = 0.6
+        elif ratio < 0.5:
+            time_pressure = 0.2
+
     # Run prediction (async — queries Lichess explorer when no checkpoint)
     try:
         result = await prediction_pipeline.predict(
@@ -83,6 +96,7 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             style=style,
             engine_top_moves=engine_top_moves,
             player_key=request.player_key,
+            time_pressure=time_pressure,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))

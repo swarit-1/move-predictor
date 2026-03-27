@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Chessboard } from "react-chessboard";
 import { useGameStore } from "../../store/gameStore";
 import { usePlayerStore } from "../../store/playerStore";
 import { startSimulation, makeSimulationMove } from "../../api/client";
 import type { Square } from "chess.js";
+import type { Piece } from "react-chessboard/dist/chessboard/types";
 
 export function SimulationBoard() {
   const { fen, simulationSessionId, setSimulationSession, setPrediction, setLoading } =
@@ -19,7 +20,7 @@ export function SimulationBoard() {
     try {
       const response = await startSimulation({
         black_rating: opponent?.rating || 1500,
-        style_overrides: styleOverrides,
+        style_overrides: { ...styleOverrides },
       });
 
       if (response.success) {
@@ -33,36 +34,33 @@ export function SimulationBoard() {
     }
   }, [opponent, styleOverrides, setSimulationSession]);
 
-  const onPieceDrop = useCallback(
-    async (sourceSquare: string, targetSquare: string): Promise<boolean> => {
+  const handlePieceDrop = useCallback(
+    (sourceSquare: string, targetSquare: string, _piece: Piece): boolean => {
       if (!simulationSessionId || aiThinking || gameOver) return false;
 
       const move = `${sourceSquare}${targetSquare}`;
       setAiThinking(true);
 
-      try {
-        const response = await makeSimulationMove(simulationSessionId, move);
-
-        if (response.success) {
-          setSimFen(response.data.fen);
-
-          if (response.data.ai_move) {
-            setLastAiMove(response.data.ai_move.move);
+      makeSimulationMove(simulationSessionId, move)
+        .then((response) => {
+          if (response.success) {
+            setSimFen(response.data.fen);
+            if (response.data.ai_move) {
+              setLastAiMove(response.data.ai_move.move);
+            }
+            if (response.data.game_over) {
+              setGameOver(true);
+            }
           }
+        })
+        .catch((error) => {
+          console.error("Move failed:", error);
+        })
+        .finally(() => {
+          setAiThinking(false);
+        });
 
-          if (response.data.game_over) {
-            setGameOver(true);
-          }
-
-          return true;
-        }
-      } catch (error) {
-        console.error("Move failed:", error);
-      } finally {
-        setAiThinking(false);
-      }
-
-      return false;
+      return true;
     },
     [simulationSessionId, aiThinking, gameOver]
   );
@@ -90,7 +88,7 @@ export function SimulationBoard() {
           <div className="rounded-lg overflow-hidden shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]">
             <Chessboard
               position={simFen}
-              onPieceDrop={onPieceDrop}
+              onPieceDrop={handlePieceDrop}
               customArrows={customArrows}
               boardWidth={480}
               customDarkSquareStyle={{ backgroundColor: "#779952" }}

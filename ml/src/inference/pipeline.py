@@ -107,6 +107,7 @@ class PredictionPipeline:
         style: StyleOverrides | None = None,
         engine_top_moves: list[dict] | None = None,
         player_key: str | None = None,
+        time_pressure: float = 0.0,
     ) -> SampledMove:
         """Predict a move for the given position."""
         if self.model is None:
@@ -124,11 +125,12 @@ class PredictionPipeline:
             return self._predict_with_model(
                 board, move_history, player_id, player_stats,
                 player_rating, style, engine_top_moves, opening_book_probs,
+                time_pressure,
             )
         else:
             return await self._predict_with_data(
                 board, player_rating, style, engine_top_moves,
-                opening_book_probs, player_key,
+                opening_book_probs, player_key, time_pressure,
             )
 
     def _predict_with_model(
@@ -141,6 +143,7 @@ class PredictionPipeline:
         style: StyleOverrides | None,
         engine_top_moves: list[dict] | None,
         opening_book_probs: dict[str, float] | None = None,
+        time_pressure: float = 0.0,
     ) -> SampledMove:
         """Run the neural network model for prediction."""
         board_tensor = torch.from_numpy(board_to_tensor(board)).unsqueeze(0).to(self.device)
@@ -182,6 +185,7 @@ class PredictionPipeline:
             style=style,
             engine_top_moves=engine_top_moves,
             opening_book_probs=opening_book_probs,
+            time_pressure=time_pressure,
         )
 
     async def _predict_with_data(
@@ -192,6 +196,7 @@ class PredictionPipeline:
         engine_top_moves: list[dict] | None,
         opening_book_probs: dict[str, float] | None = None,
         player_key: str | None = None,
+        time_pressure: float = 0.0,
     ) -> SampledMove:
         """Predict using real human data when available, falling back to Stockfish.
 
@@ -257,6 +262,7 @@ class PredictionPipeline:
                 engine_top_moves=engine_top_moves,
                 opening_book_probs=None,  # Already baked in
                 apply_blind_spots=False,  # Data is already human-like
+                time_pressure=time_pressure,
             )
         else:
             # Stockfish fallback or rating explorer — apply blind spots
@@ -269,6 +275,7 @@ class PredictionPipeline:
                 style=style,
                 engine_top_moves=engine_top_moves,
                 opening_book_probs=opening_book_probs,
+                time_pressure=time_pressure,
             )
 
     def _book_probs_to_logits(

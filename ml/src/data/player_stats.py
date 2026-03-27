@@ -107,6 +107,7 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
     results = {"win": 0, "loss": 0, "draw": 0}
     openings: list[str] = []
     endgame_results: list[bool] = []  # True = won/drew from endgame, False = lost
+    all_ratings: list[float] = []  # Collect ratings to average (not just take last)
 
     CENTER_SQUARES = {chess.E4, chess.D4, chess.E5, chess.D5,
                       chess.C3, chess.D3, chess.E3, chess.F3,
@@ -129,10 +130,13 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
         elif result == "1/2-1/2":
             results["draw"] += 1
 
-        # Track rating
+        # Track rating — handle provisional ratings like "1523?"
         rating_key = "WhiteElo" if is_white else "BlackElo"
+        rating_str = headers.get(rating_key, "")
         try:
-            stats.rating = float(headers.get(rating_key, stats.rating))
+            clean_rating = str(rating_str).strip().rstrip("?")
+            if clean_rating:
+                all_ratings.append(float(clean_rating))
         except (ValueError, TypeError):
             pass
 
@@ -238,6 +242,10 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
             openings.append(first_move)
 
     total_games = max(stats.num_games, 1)
+
+    # Use average of all game ratings (not just last game's)
+    if all_ratings:
+        stats.rating = sum(all_ratings) / len(all_ratings)
 
     # Compute derived stats
     stats.win_rate = results["win"] / total_games
