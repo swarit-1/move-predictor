@@ -56,15 +56,20 @@ export function ChessBoard() {
     (playerColor === "w" && turn === "white") ||
     (playerColor === "b" && turn === "black");
 
+  const onFlag = useGameStore((s) => s.onFlag);
+  const flagGameOver = useGameStore((s) => s.flagGameOver);
+
   const opponentName = opponent?.username ?? "Opponent";
   const isViewingHistory = viewIndex !== -1;
   const hasClock = timeControl !== null && timeControl.initial > 0;
-  const opponentClockRunning = hasClock && !isPlayerTurn && !isGameOver && !isViewingHistory;
-  const playerClockRunning = hasClock && isPlayerTurn && !isGameOver && !isViewingHistory;
+  const anyGameOver = isGameOver || !!flagGameOver;
+  const opponentClockRunning = hasClock && !isPlayerTurn && !anyGameOver && !isViewingHistory;
+  const playerClockRunning = hasClock && isPlayerTurn && !anyGameOver && !isViewingHistory;
 
   const onOpponentTick = useCallback((elapsed: number) => tickClock("opponent", elapsed), [tickClock]);
   const onPlayerTick = useCallback((elapsed: number) => tickClock("player", elapsed), [tickClock]);
-  const onTimeOut = useCallback(() => {}, []);
+  const onOpponentTimeOut = useCallback(() => onFlag("opponent"), [onFlag]);
+  const onPlayerTimeOut = useCallback(() => onFlag("player"), [onFlag]);
 
   return (
     <div ref={containerRef} style={{ width: boardSize }}>
@@ -97,7 +102,7 @@ export function ChessBoard() {
             timeLeft={opponentTimeLeft}
             isRunning={opponentClockRunning}
             onTick={onOpponentTick}
-            onTimeOut={onTimeOut}
+            onTimeOut={onOpponentTimeOut}
           />
         )}
       </div>
@@ -173,7 +178,7 @@ export function ChessBoard() {
               timeLeft={playerTimeLeft}
               isRunning={playerClockRunning}
               onTick={onPlayerTick}
-              onTimeOut={onTimeOut}
+              onTimeOut={onPlayerTimeOut}
             />
           )}
         </div>

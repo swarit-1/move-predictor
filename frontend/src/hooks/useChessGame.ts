@@ -11,6 +11,7 @@ export function useChessGame() {
     undoMove,
     resetGame,
     setFen,
+    flagGameOver,
   } = useGameStore();
 
   const onPieceDrop = useCallback(
@@ -20,7 +21,7 @@ export function useChessGame() {
     [makeMove]
   );
 
-  const isGameOver = chess.isGameOver();
+  const isGameOver = chess.isGameOver() || !!flagGameOver;
   // Derive turn from fen (not chess instance) so it's correct when viewing history
   const fenTurn = fen.split(" ")[1];
   const turn = fenTurn === "b" ? "black" : "white";

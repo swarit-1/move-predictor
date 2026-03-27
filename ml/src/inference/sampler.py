@@ -76,23 +76,24 @@ def compute_temperature(
         time_pressure: 0.0 (no pressure) to 1.0 (extreme time pressure).
 
     Returns:
-        Temperature value (0.25 to 1.0).
+        Temperature value (0.25 to 1.5, ceiling depends on rating).
     """
     if style is None:
         style = StyleOverrides()
 
-    # Base temperature from rating — tight range since top-p prevents
-    # tail sampling. Maps 400-2800 to 0.9-0.3
-    rating_temp = max(0.3, 0.95 - (player_rating / 4000.0))
+    # Base temperature from rating — wider separation so low-rated players
+    # deviate significantly more than high-rated ones.
+    # Rating 800 → ~0.94, Rating 1500 → ~0.62, Rating 2400 → ~0.21
+    rating_temp = max(0.20, 1.3 - (player_rating / 2200.0))
 
-    # Light error adjustment
-    error_temp = 0.2 * predicted_cpl + 0.1 * blunder_prob
+    # Error adjustment — contributes meaningfully to temperature
+    error_temp = 0.3 * predicted_cpl + 0.2 * blunder_prob
 
     # Style adjustments
     risk_factor = style.risk_taking / 100.0
     blunder_factor = style.blunder_frequency / 100.0
 
-    temperature = rating_temp + error_temp * 0.2
+    temperature = rating_temp + error_temp * 0.4
     temperature *= (0.7 + 0.6 * risk_factor)
     temperature *= (0.85 + 0.3 * blunder_factor)
 
@@ -100,8 +101,9 @@ def compute_temperature(
     if time_pressure > 0:
         temperature *= (1.0 + 0.5 * time_pressure)
 
-    # Hard ceiling at 1.0 — blind spots + top-p handle all error modeling
-    return max(0.25, min(1.0, temperature))
+    # Rating-dependent ceiling: low-rated players can reach higher temperatures
+    ceiling = 1.5 if player_rating < 1200 else 1.2 if player_rating < 1800 else 1.0
+    return max(0.25, min(ceiling, temperature))
 
 
 def apply_style_bias(
@@ -161,8 +163,14 @@ def _compute_top_p(player_rating: float) -> float:
     Rating 2000 -> top_p = 0.88 (considers ~5-7 moves)
     Rating 2500 -> top_p = 0.82 (considers ~3-5 moves)
     """
-    top_p = 0.97 - (player_rating - 400) * (0.15 / 2100)
-    return max(0.80, min(0.98, top_p))
+    # Tighter nucleus for higher-rated players:
+    # Rating 400  -> top_p = 0.95 (considers ~12-15 moves)
+    # Rating 1000 -> top_p = 0.90 (considers ~8-10 moves)
+    # Rating 1500 -> top_p = 0.85 (considers ~5-7 moves)
+    # Rating 2000 -> top_p = 0.80 (considers ~3-5 moves)
+    # Rating 2500 -> top_p = 0.72 (considers ~2-4 moves)
+    top_p = 0.95 - (player_rating - 400) * (0.23 / 2100)
+    return max(0.70, min(0.96, top_p))
 
 
 def _apply_nucleus_sampling(
@@ -267,7 +275,7 @@ def sample_move(
 
     # Apply blind spot biases — structured human error modeling
     if apply_blind_spots:
-        blind_spot_config = BlindSpotConfig.from_rating(player_rating)
+        blind_spot_config = BlindSpotConfig.from_rating(player_rating, time_pressure)
         bs_result = compute_blind_spot_biases(
             logits, board, blind_spot_config, engine_top_moves,
         )
@@ -289,16 +297,33 @@ def sample_move(
     top_p = _compute_top_p(player_rating)
     probs = _apply_nucleus_sampling(probs, top_p)
 
-    # Hard floor: zero out any move with < 0.3% probability.
-    # No human would play a move that's correct less than 1 in 300 times.
-    min_prob = 0.003
+    # Rating-dependent probability floor: higher-rated players never play
+    # moves that are correct less than a certain fraction of the time.
+    if player_rating >= 2200:
+        min_prob = 0.03   # 3% — only top ~5-8 moves survive
+    elif player_rating >= 1600:
+        min_prob = 0.015  # 1.5%
+    elif player_rating >= 1200:
+        min_prob = 0.008  # 0.8%
+    else:
+        min_prob = 0.003  # 0.3% — allow more variety for beginners
+
     probs[probs < min_prob] = 0.0
     prob_sum = probs.sum()
     if prob_sum > 0:
         probs = probs / prob_sum
 
-    # Sample from the filtered distribution
-    move_idx = torch.multinomial(probs, num_samples=1).item()
+    # Deterministic play for strong players: if the best move has a dominant
+    # probability after all filtering, play it directly (argmax).
+    # This prevents 2400+ players from "randomly" deviating from clear best moves.
+    top1_prob = probs.max().item()
+    if player_rating >= 2200 and top1_prob >= 0.60:
+        move_idx = probs.argmax().item()
+    elif player_rating >= 1800 and top1_prob >= 0.75:
+        move_idx = probs.argmax().item()
+    else:
+        # Sample from the filtered distribution
+        move_idx = torch.multinomial(probs, num_samples=1).item()
 
     # Decode the move
     selected_move = decode_move(move_idx, board)

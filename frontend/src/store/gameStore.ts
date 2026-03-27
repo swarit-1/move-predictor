@@ -32,6 +32,21 @@ export interface EvalHistoryEntry {
   mate: number | null;
 }
 
+export type GameOverReason =
+  | "checkmate"
+  | "stalemate"
+  | "draw_repetition"
+  | "draw_insufficient"
+  | "draw_50_move"
+  | "flag_player"
+  | "flag_opponent";
+
+export interface GameOverInfo {
+  reason: GameOverReason;
+  winner: "player" | "opponent" | "draw";
+  description: string;
+}
+
 interface GameState {
   chess: Chess;
   fen: string;
@@ -63,6 +78,9 @@ interface GameState {
   playerTimeLeft: number;
   opponentTimeLeft: number;
 
+  // Game over by flag (time) — separate from chess.js game-over detection
+  flagGameOver: GameOverInfo | null;
+
   setFen: (fen: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
   applyPredictedMove: (moveUci: string) => boolean;
@@ -86,6 +104,7 @@ interface GameState {
   setTimeControl: (tc: { initial: number; increment: number } | null) => void;
   tickClock: (side: "player" | "opponent", elapsed: number) => void;
   addIncrement: (side: "player" | "opponent") => void;
+  onFlag: (side: "player" | "opponent") => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -108,6 +127,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   timeControl: null,
   playerTimeLeft: 0,
   opponentTimeLeft: 0,
+  flagGameOver: null,
 
   setFen: (fen) => {
     const chess = new Chess(fen);
@@ -116,6 +136,9 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   makeMove: (from, to, promotion) => {
     const state = get();
+    // Block moves if game is over by flag
+    if (state.flagGameOver) return false;
+
     // If viewing history, jump to latest before making a move
     let chess = state.chess;
     if (state.viewIndex !== -1) {
@@ -144,6 +167,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   applyPredictedMove: (moveUci) => {
+    if (get().flagGameOver) return false;
     const chess = get().chess;
     try {
       const from = moveUci.slice(0, 2);
@@ -192,6 +216,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       evalHistory: [],
       simulationSessionId: null,
       viewIndex: -1,
+      flagGameOver: null,
     });
   },
 
@@ -289,6 +314,55 @@ export const useGameStore = create<GameState>((set, get) => ({
       set((s) => ({ playerTimeLeft: s.playerTimeLeft + tc.increment }));
     } else {
       set((s) => ({ opponentTimeLeft: s.opponentTimeLeft + tc.increment }));
+    }
+  },
+
+  onFlag: (flaggedSide) => {
+    const state = get();
+    if (state.flagGameOver) return; // Already flagged
+
+    // Check if the non-flagged side has sufficient mating material
+    const opponentColor = flaggedSide === "player"
+      ? (state.playerColor === "w" ? "b" : "w")
+      : state.playerColor;
+
+    const pieces = state.chess
+      .board()
+      .flat()
+      .filter((p): p is NonNullable<typeof p> => p !== null && p.color === opponentColor);
+
+    let hasMatingMaterial = true;
+    if (pieces.length === 1) {
+      // King alone — insufficient
+      hasMatingMaterial = false;
+    } else if (pieces.length === 2) {
+      const other = pieces.find((p) => p.type !== "k");
+      if (other && (other.type === "n" || other.type === "b")) {
+        // K + N or K + B — insufficient
+        hasMatingMaterial = false;
+      }
+    }
+
+    if (hasMatingMaterial) {
+      const winner = flaggedSide === "player" ? "opponent" : "player";
+      const description = flaggedSide === "player"
+        ? "You lost on time"
+        : "Opponent lost on time";
+      set({
+        flagGameOver: {
+          reason: flaggedSide === "player" ? "flag_player" : "flag_opponent",
+          winner: winner as "player" | "opponent",
+          description,
+        },
+      });
+    } else {
+      set({
+        flagGameOver: {
+          reason: "draw_insufficient",
+          winner: "draw",
+          description: "Draw — insufficient mating material",
+        },
+      });
     }
   },
 }));

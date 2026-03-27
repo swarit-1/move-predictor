@@ -33,6 +33,7 @@ export function GameScreen({ onBack }: Props) {
   const timeControl = useGameStore((s) => s.timeControl);
   const opponentTimeLeft = useGameStore((s) => s.opponentTimeLeft);
   const addIncrement = useGameStore((s) => s.addIncrement);
+  const flagGameOver = useGameStore((s) => s.flagGameOver);
   const opponent = usePlayerStore((s) => s.opponent);
   const { fetchPrediction, predictionError, retryPrediction } = usePrediction();
   const prevMoveCountRef = useRef(moveHistory.length);
@@ -70,23 +71,46 @@ export function GameScreen({ onBack }: Props) {
 
   // Apply prediction to the board when it arrives (opponent's move)
   useEffect(() => {
-    if (prediction?.move) {
+    if (prediction?.move && !flagGameOver) {
       const currentTurn = chess.turn();
       const isOpponentTurn = currentTurn !== playerColor;
       if (isOpponentTurn) {
-        // Compute realistic think time based on time control
-        let delay = 300;
-        if (timeControl && timeControl.initial > 0) {
-          const initial = timeControl.initial;
-          if (initial <= 60) delay = 200 + Math.random() * 500;
-          else if (initial <= 300) delay = 500 + Math.random() * 2000;
-          else if (initial <= 900) delay = 1000 + Math.random() * 4000;
-          else delay = 2000 + Math.random() * 8000;
+        // Compute realistic think time based on position complexity,
+        // rating, game phase, time control, and remaining time.
+        const numMoves = moveHistory.length;
+        const legalMoves = chess.moves().length;
+        const opponentRating = opponent?.rating ?? 1500;
 
-          // Move faster when low on time
-          if (opponentTimeLeft < 30) delay = Math.min(delay, 300 + Math.random() * 500);
-          if (opponentTimeLeft < 10) delay = Math.min(delay, 100 + Math.random() * 200);
+        // Base time: 1-8 seconds depending on number of legal moves
+        let delay = 1000 + (legalMoves / 40) * 3000;
+
+        // Game phase: opening moves are faster (theory), endgame slightly faster
+        if (numMoves < 20) {
+          delay *= 0.4; // Opening — theory
+        } else if (numMoves > 60) {
+          delay *= 0.7; // Endgame
         }
+
+        // Rating: higher rated = slightly longer (more careful)
+        delay *= (0.7 + opponentRating / 4000);
+
+        // Time control scaling
+        if (timeControl && timeControl.initial > 0) {
+          // Bullet = faster, classical = slower
+          const tcFactor = Math.min(1.5, Math.max(0.3, timeControl.initial / 600));
+          delay *= tcFactor;
+
+          // Time pressure: speed up significantly when low
+          if (opponentTimeLeft < 10) delay = Math.min(delay, 100 + Math.random() * 300);
+          else if (opponentTimeLeft < 30) delay = Math.min(delay, 300 + Math.random() * 700);
+          else if (opponentTimeLeft < 60) delay *= 0.5;
+        }
+
+        // Random jitter ±30%
+        delay *= (0.7 + Math.random() * 0.6);
+
+        // Clamp to reasonable range
+        delay = Math.max(400, Math.min(12000, delay));
 
         const timer = setTimeout(() => {
           applyPredictedMove(prediction.move);
@@ -95,20 +119,22 @@ export function GameScreen({ onBack }: Props) {
         return () => clearTimeout(timer);
       }
     }
-  }, [prediction, chess, playerColor, applyPredictedMove, timeControl, opponentTimeLeft, addIncrement]);
+  }, [prediction, chess, playerColor, applyPredictedMove, timeControl, opponentTimeLeft, addIncrement, flagGameOver, opponent, moveHistory]);
 
-  // Auto-predict after the player makes a move
+  // Auto-predict after the player makes a move, and add increment to player's clock
   useEffect(() => {
     const currentCount = moveHistory.length;
     if (currentCount > prevMoveCountRef.current && currentCount > 0) {
       const currentTurn = chess.turn();
       const isOpponentTurn = currentTurn !== playerColor;
-      if (isOpponentTurn && !chess.isGameOver()) {
+      if (isOpponentTurn && !chess.isGameOver() && !flagGameOver) {
+        // Player just moved — add increment to player's clock
+        if (timeControl) addIncrement("player");
         fetchPrediction();
       }
     }
     prevMoveCountRef.current = currentCount;
-  }, [moveHistory.length, chess, playerColor, fetchPrediction]);
+  }, [moveHistory.length, chess, playerColor, fetchPrediction, timeControl, addIncrement, flagGameOver]);
 
   return (
     <div className="min-h-screen bg-surface-0 text-zinc-100 flex flex-col">

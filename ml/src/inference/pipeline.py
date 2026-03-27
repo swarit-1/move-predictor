@@ -224,21 +224,31 @@ class PredictionPipeline:
                 board.fen(), username, color
             )
 
-        # Step 3: Build logits from the best available data source
-        if player_explorer_moves and len(player_explorer_moves) >= 2:
+        # Step 3: Build logits from the best available data source.
+        # Require minimum game count for explorer data to be reliable.
+        def _has_sufficient_data(moves: list[dict], min_games: int = 20) -> bool:
+            if not moves or len(moves) < 2:
+                return False
+            total = sum(m.get("total", 0) for m in moves)
+            return total >= min_games
+
+        if _has_sufficient_data(player_explorer_moves, min_games=5):
             logits = explorer_moves_to_logits(player_explorer_moves, board)
             source = "player_explorer"
         elif opening_book_probs and len(opening_book_probs) >= 2:
             logits = self._book_probs_to_logits(opening_book_probs, board)
             source = "opening_book"
-        elif explorer_moves and len(explorer_moves) >= 2:
+        elif _has_sufficient_data(explorer_moves, min_games=20):
             logits = explorer_moves_to_logits(explorer_moves, board)
             source = "rating_explorer"
         else:
             logits = self._build_stockfish_logits(board, engine_top_moves)
             source = "stockfish_fallback"
 
-        logger.debug("Prediction source: %s for FEN: %s", source, board.fen()[:40])
+        logger.info(
+            "PIPELINE | source=%s | rating=%.0f | fen=%s",
+            source, player_rating, board.fen()[:50],
+        )
 
         # Step 4: Estimate error metrics from rating
         estimated_cpl = max(0.0, 3.0 - player_rating * 0.0012)
@@ -371,11 +381,58 @@ class PredictionPipeline:
                 except (ValueError, IndexError):
                     continue
         else:
-            # No Stockfish data — equal logits with small noise
+            # No Stockfish data — use chess heuristics instead of flat random.
+            # Rewards development, captures, checks, castling; penalizes
+            # aimless king moves and early queen sorties.
             for move in board.legal_moves:
                 try:
                     idx = encode_move(move, board)
-                    logits[idx] = 0.0 + random.gauss(0, 0.2)
+                    score = 0.0
+                    piece = board.piece_at(move.from_square)
+                    if not piece:
+                        logits[idx] = -5.0
+                        continue
+
+                    # Centralization bonus
+                    to_file = chess.square_file(move.to_square)
+                    to_rank = chess.square_rank(move.to_square)
+                    center_dist = abs(to_file - 3.5) + abs(to_rank - 3.5)
+                    score += max(0, 3.0 - center_dist) * 0.3
+
+                    # Capture bonus (with MVV-LVA heuristic)
+                    if board.is_capture(move):
+                        victim = board.piece_at(move.to_square)
+                        if victim:
+                            piece_values = {1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0}
+                            gain = piece_values.get(victim.piece_type, 0) - piece_values.get(piece.piece_type, 0)
+                            score += 1.0 + max(0, gain) * 0.5
+
+                    # Check bonus
+                    board.push(move)
+                    if board.is_check():
+                        score += 0.8
+                    board.pop()
+
+                    # Castling bonus
+                    if board.is_castling(move):
+                        score += 2.0
+
+                    # Penalize moving king (non-castling) in opening/middlegame
+                    if piece.piece_type == chess.KING and not board.is_castling(move):
+                        score -= 1.5
+
+                    # Penalize early queen moves (before move 10)
+                    if piece.piece_type == chess.QUEEN and board.fullmove_number < 10:
+                        score -= 0.5
+
+                    # Development bonus for knights and bishops in opening
+                    if board.fullmove_number < 15 and piece.piece_type in (chess.KNIGHT, chess.BISHOP):
+                        from_rank = chess.square_rank(move.from_square)
+                        home_rank = 0 if piece.color == chess.WHITE else 7
+                        if from_rank == home_rank:
+                            score += 0.6  # Reward developing undeveloped pieces
+
+                    logits[idx] = score + random.gauss(0, 0.15)
                 except (ValueError, IndexError):
                     continue
 

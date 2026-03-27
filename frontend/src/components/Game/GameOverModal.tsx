@@ -9,9 +9,11 @@ export function GameOverModal({ onNewGame }: Props) {
   const chess = useGameStore((s) => s.chess);
   const playerColor = useGameStore((s) => s.playerColor);
   const moveHistory = useGameStore((s) => s.moveHistory);
+  const flagGameOver = useGameStore((s) => s.flagGameOver);
   const [dismissed, setDismissed] = useState(false);
 
-  const isOver = chess.isGameOver();
+  const isChessOver = chess.isGameOver();
+  const isOver = isChessOver || !!flagGameOver;
 
   useEffect(() => {
     if (!isOver) setDismissed(false);
@@ -24,7 +26,25 @@ export function GameOverModal({ onNewGame }: Props) {
   let resultGradient: string;
   let glowColor: string;
 
-  if (chess.isCheckmate()) {
+  if (flagGameOver) {
+    // Game ended by time (flag)
+    if (flagGameOver.winner === "draw") {
+      result = "Draw";
+      description = flagGameOver.description;
+      resultGradient = "from-zinc-300 to-zinc-400";
+      glowColor = "shadow-zinc-500/10";
+    } else {
+      const playerWon = flagGameOver.winner === "player";
+      result = playerWon ? "Victory" : "Defeat";
+      description = flagGameOver.description;
+      resultGradient = playerWon
+        ? "from-human to-green-300"
+        : "from-blunder to-rose-300";
+      glowColor = playerWon
+        ? "shadow-human/20"
+        : "shadow-blunder/20";
+    }
+  } else if (chess.isCheckmate()) {
     const loser = chess.turn();
     const playerWon = loser !== playerColor;
     result = playerWon ? "Victory" : "Defeat";

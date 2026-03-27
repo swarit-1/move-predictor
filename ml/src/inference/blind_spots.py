@@ -42,23 +42,35 @@ class BlindSpotConfig:
     king_attack_neglect: float = 0.0
 
     @classmethod
-    def from_rating(cls, rating: float) -> "BlindSpotConfig":
-        """Derive blind spot strengths from player rating.
+    def from_rating(cls, rating: float, time_pressure: float = 0.0) -> "BlindSpotConfig":
+        """Derive blind spot strengths from player rating and time pressure.
 
         Lower-rated players have stronger blind spots.
-        Rating 600 -> near max blind spots
-        Rating 2400+ -> near zero blind spots
+        Time pressure intensifies all blind spots.
+
+        Rating 600  -> weakness ~1.0 (max blind spots)
+        Rating 1200 -> weakness ~0.67
+        Rating 1800 -> weakness ~0.33
+        Rating 2200 -> weakness ~0.11
+        Rating 2400+ -> weakness ~0.0 (near-zero blind spots)
         """
         weakness = max(0.0, min(1.0, (2400 - rating) / 1800))
 
+        # Time pressure amplifies blind spots (up to 50% stronger)
+        pressure_mult = 1.0 + 0.5 * time_pressure
+
+        # At rating 2400+: all biases ≤ 0.05
+        # At rating 1800: biases ~0.2-0.3
+        # At rating 1200: biases ~0.5-0.7
+        # At rating 800: biases ~0.8-1.0
         return cls(
-            tactical_blindness=weakness * 0.8,
-            material_greed=weakness * 0.6 + 0.1,
-            check_attraction=weakness * 0.5 + 0.05,
-            piece_preference=weakness * 0.3,
-            king_safety_neglect=weakness * 0.5,
-            long_range_blindness=weakness * 0.7,
-            king_attack_neglect=weakness * 0.6,
+            tactical_blindness=weakness * 1.0 * pressure_mult,
+            material_greed=weakness * 0.8 * pressure_mult,
+            check_attraction=weakness * 0.7 * pressure_mult,
+            piece_preference=weakness * 0.4 * pressure_mult,
+            king_safety_neglect=weakness * 0.7 * pressure_mult,
+            long_range_blindness=weakness * 0.9 * pressure_mult,
+            king_attack_neglect=weakness * 0.8 * pressure_mult,
         )
 
 

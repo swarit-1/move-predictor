@@ -19,6 +19,15 @@ interface GameSession {
   styleOverrides?: Record<string, number>;
   createdAt: Date;
   lastAccessedAt: Date;
+  // Time control
+  whiteTimeRemaining: number; // milliseconds
+  blackTimeRemaining: number; // milliseconds
+  increment: number; // milliseconds
+  initialTime: number; // milliseconds
+  lastMoveTimestamp: number; // Date.now()
+  gameOver: boolean;
+  gameOverReason?: string;
+  winner?: "white" | "black" | "draw";
 }
 
 const sessions = new Map<string, GameSession>();
@@ -66,6 +75,13 @@ const startSchema = z.object({
   white_rating: z.number().optional().default(1500),
   black_rating: z.number().optional().default(1500),
   style_overrides: z.record(z.number()).optional(),
+  time_control: z
+    .object({
+      initial_time: z.number().min(0), // seconds
+      increment: z.number().min(0), // seconds
+    })
+    .optional(),
+  player_color: z.enum(["white", "black"]).optional().default("white"),
 });
 
 /**
@@ -82,6 +98,10 @@ simulateRouter.post("/start", (req: Request, res: Response) => {
     }
 
     const now = new Date();
+    const tc = params.time_control;
+    const initialMs = tc ? tc.initial_time * 1000 : 0;
+    const incrementMs = tc ? tc.increment * 1000 : 0;
+
     const session: GameSession = {
       id: uuidv4(),
       chess: new Chess(),
@@ -93,6 +113,12 @@ simulateRouter.post("/start", (req: Request, res: Response) => {
       styleOverrides: params.style_overrides,
       createdAt: now,
       lastAccessedAt: now,
+      whiteTimeRemaining: initialMs,
+      blackTimeRemaining: initialMs,
+      increment: incrementMs,
+      initialTime: initialMs,
+      lastMoveTimestamp: Date.now(),
+      gameOver: false,
     };
 
     sessions.set(session.id, session);
@@ -128,17 +154,50 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
 
     const { move } = req.body;
 
-    if (session.chess.isGameOver()) {
+    if (session.gameOver || session.chess.isGameOver()) {
       res.json({
         success: true,
         data: {
           game_over: true,
-          result: getResult(session.chess),
+          result: session.gameOverReason || getResult(session.chess),
+          winner: session.winner,
           fen: session.chess.fen(),
           pgn: session.chess.pgn(),
+          white_time: session.whiteTimeRemaining,
+          black_time: session.blackTimeRemaining,
         },
       });
       return;
+    }
+
+    // Deduct elapsed time from the moving side's clock
+    const now = Date.now();
+    if (session.initialTime > 0) {
+      const elapsed = now - session.lastMoveTimestamp;
+      const movingSide = session.chess.turn() === "w" ? "white" : "black";
+      const timeKey = movingSide === "white" ? "whiteTimeRemaining" : "blackTimeRemaining";
+      session[timeKey] -= elapsed;
+
+      // Check flag
+      if (session[timeKey] <= 0) {
+        session[timeKey] = 0;
+        session.gameOver = true;
+        session.gameOverReason = "flag";
+        session.winner = movingSide === "white" ? "black" : "white";
+        res.json({
+          success: true,
+          data: {
+            game_over: true,
+            result: "flag",
+            winner: session.winner,
+            fen: session.chess.fen(),
+            pgn: session.chess.pgn(),
+            white_time: session.whiteTimeRemaining,
+            black_time: session.blackTimeRemaining,
+          },
+        });
+        return;
+      }
     }
 
     if (move) {
@@ -149,11 +208,19 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
         return;
       }
       session.moveHistory.push(result.lan);
+
+      // Add increment to the player who just moved
+      if (session.initialTime > 0) {
+        const movedSide = session.chess.turn() === "w" ? "black" : "white";
+        const movedTimeKey = movedSide === "white" ? "whiteTimeRemaining" : "blackTimeRemaining";
+        session[movedTimeKey] += session.increment;
+      }
+      session.lastMoveTimestamp = Date.now();
     }
 
     // If it's the AI's turn (or no move was provided), get AI prediction
     let aiMove = null;
-    if (!session.chess.isGameOver()) {
+    if (!session.chess.isGameOver() && !session.gameOver) {
       const isWhiteTurn = session.chess.turn() === "w";
       const playerId = isWhiteTurn
         ? session.whitePlayerId
@@ -162,18 +229,36 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
         ? session.whiteRating
         : session.blackRating;
 
+      // Pass time info to ML service for time pressure calculation
+      const aiTimeKey = isWhiteTurn ? "whiteTimeRemaining" : "blackTimeRemaining";
+      const timeRemaining = session.initialTime > 0
+        ? session[aiTimeKey] / 1000
+        : undefined;
+      const timeControlInitial = session.initialTime > 0
+        ? session.initialTime / 1000
+        : undefined;
+
       const prediction = await mlClient.predict({
         fen: session.chess.fen(),
         move_history: session.moveHistory,
         player_id: playerId,
         player_rating: rating,
         style_overrides: session.styleOverrides,
+        time_remaining: timeRemaining,
+        time_control_initial: timeControlInitial,
       });
 
       // Apply the predicted move
       const aiResult = session.chess.move(prediction.move);
       if (aiResult) {
         session.moveHistory.push(aiResult.lan);
+
+        // Add increment to AI's clock
+        if (session.initialTime > 0) {
+          session[aiTimeKey] += session.increment;
+        }
+        session.lastMoveTimestamp = Date.now();
+
         aiMove = {
           move: prediction.move,
           probability: prediction.probability,
@@ -190,11 +275,18 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
       data: {
         fen: session.chess.fen(),
         turn: session.chess.turn() === "w" ? "white" : "black",
-        game_over: session.chess.isGameOver(),
-        result: session.chess.isGameOver() ? getResult(session.chess) : null,
+        game_over: session.gameOver || session.chess.isGameOver(),
+        result: session.gameOver
+          ? session.gameOverReason
+          : session.chess.isGameOver()
+            ? getResult(session.chess)
+            : null,
+        winner: session.winner,
         ai_move: aiMove,
         move_history: session.moveHistory,
         pgn: session.chess.pgn(),
+        white_time: session.whiteTimeRemaining,
+        black_time: session.blackTimeRemaining,
       },
     });
   } catch (error: any) {
@@ -224,9 +316,11 @@ simulateRouter.get("/:sessionId", (req: Request, res: Response) => {
       session_id: session.id,
       fen: session.chess.fen(),
       turn: session.chess.turn() === "w" ? "white" : "black",
-      game_over: session.chess.isGameOver(),
+      game_over: session.gameOver || session.chess.isGameOver(),
       move_history: session.moveHistory,
       pgn: session.chess.pgn(),
+      white_time: session.whiteTimeRemaining,
+      black_time: session.blackTimeRemaining,
     },
   });
 });
