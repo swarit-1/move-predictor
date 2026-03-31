@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useGameStore } from "../store/gameStore";
 
 interface Options {
@@ -12,6 +12,17 @@ export function useKeyboardShortcuts({ onBack }: Options) {
   const setPlayerColor = useGameStore((s) => s.setPlayerColor);
   const showEvalBar = useGameStore((s) => s.showEvalBar);
   const setShowEvalBar = useGameStore((s) => s.setShowEvalBar);
+  const goToMove = useGameStore((s) => s.goToMove);
+  const goToLatest = useGameStore((s) => s.goToLatest);
+  const viewIndex = useGameStore((s) => s.viewIndex);
+  const moveHistory = useGameStore((s) => s.moveHistory);
+
+  // Use refs so the keydown handler always sees the latest values without
+  // needing to re-register on every move (avoids stale closure).
+  const viewIndexRef = useRef(viewIndex);
+  const moveHistoryRef = useRef(moveHistory);
+  viewIndexRef.current = viewIndex;
+  moveHistoryRef.current = moveHistory;
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -20,6 +31,48 @@ export function useKeyboardShortcuts({ onBack }: Options) {
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       ) {
+        return;
+      }
+
+      const totalMoves = moveHistoryRef.current.length;
+      const vi = viewIndexRef.current;
+
+      // ← ArrowLeft: step back one move
+      if (e.key === "ArrowLeft" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (totalMoves === 0) return;
+        if (vi === -1) {
+          if (totalMoves >= 2) goToMove(totalMoves - 2);
+          // if only 1 move played, already at the only move — nothing earlier
+        } else if (vi > 0) {
+          goToMove(vi - 1);
+        }
+        return;
+      }
+
+      // → ArrowRight: step forward one move
+      if (e.key === "ArrowRight" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (vi === -1) return; // already at latest
+        if (vi >= totalMoves - 1) {
+          goToLatest();
+        } else {
+          goToMove(vi + 1);
+        }
+        return;
+      }
+
+      // Home: jump to first move
+      if (e.key === "Home" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (totalMoves > 0) goToMove(0);
+        return;
+      }
+
+      // End: jump to latest
+      if (e.key === "End" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        goToLatest();
         return;
       }
 
@@ -51,5 +104,5 @@ export function useKeyboardShortcuts({ onBack }: Options) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undoMove, resetGame, onBack, playerColor, setPlayerColor, showEvalBar, setShowEvalBar]);
+  }, [undoMove, onBack, playerColor, setPlayerColor, showEvalBar, setShowEvalBar, goToMove, goToLatest]);
 }

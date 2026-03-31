@@ -92,6 +92,8 @@ interface GameState {
   setPositionEval: (eval_: PositionEval | null) => void;
   setEvalLoading: (loading: boolean) => void;
   setShowEvalBar: (show: boolean) => void;
+  showArrows: boolean;
+  setShowArrows: (show: boolean) => void;
   pushEvalHistory: (entry: EvalHistoryEntry) => void;
   setPlayerColor: (color: "w" | "b") => void;
   setMode: (mode: "analyze" | "simulate") => void;
@@ -118,6 +120,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   positionEval: null,
   evalLoading: false,
   showEvalBar: true,
+  showArrows: true,
   evalHistory: [],
   playerColor: "w",
   mode: "analyze",
@@ -226,6 +229,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setPositionEval: (eval_) => set({ positionEval: eval_ }),
   setEvalLoading: (loading) => set({ evalLoading: loading }),
   setShowEvalBar: (show) => set({ showEvalBar: show }),
+  setShowArrows: (show) => set({ showArrows: show }),
   pushEvalHistory: (entry) => set((s) => ({ evalHistory: [...s.evalHistory, entry] })),
   setPlayerColor: (color) => set({ playerColor: color }),
   setMode: (mode) => set({ mode }),

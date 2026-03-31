@@ -26,6 +26,8 @@ export function GameScreen({ onBack }: Props) {
   const playerColor = useGameStore((s) => s.playerColor);
   const showEvalBar = useGameStore((s) => s.showEvalBar);
   const setShowEvalBar = useGameStore((s) => s.setShowEvalBar);
+  const showArrows = useGameStore((s) => s.showArrows);
+  const setShowArrows = useGameStore((s) => s.setShowArrows);
   const applyPredictedMove = useGameStore((s) => s.applyPredictedMove);
   const prediction = useGameStore((s) => s.prediction);
   const pendingOpeningMoves = useGameStore((s) => s.pendingOpeningMoves);
@@ -40,6 +42,9 @@ export function GameScreen({ onBack }: Props) {
   const hasTriggeredFirstMove = useRef(false);
   const [showStylePanel, setShowStylePanel] = useState(false);
   const [showEvalGraph, setShowEvalGraph] = useState(false);
+  // Ref so think-time effect can read current time without re-running on every tick
+  const opponentTimeLeftRef = useRef(opponentTimeLeft);
+  useEffect(() => { opponentTimeLeftRef.current = opponentTimeLeft; }, [opponentTimeLeft]);
 
   // Hooks
   useEvaluation();
@@ -69,7 +74,11 @@ export function GameScreen({ onBack }: Props) {
     }
   }, [playerColor, moveHistory.length, pendingOpeningMoves, fetchPrediction]);
 
-  // Apply prediction to the board when it arrives (opponent's move)
+  // Apply prediction to the board when it arrives (opponent's move).
+  // IMPORTANT: opponentTimeLeft is intentionally NOT in the dependency array.
+  // It changes every 100ms (clock tick), which would reset the setTimeout on
+  // every tick and prevent the move from ever firing during timed games.
+  // Instead we read the current value via opponentTimeLeftRef at effect setup time.
   useEffect(() => {
     if (prediction?.move && !flagGameOver) {
       const currentTurn = chess.turn();
@@ -80,6 +89,7 @@ export function GameScreen({ onBack }: Props) {
         const numMoves = moveHistory.length;
         const legalMoves = chess.moves().length;
         const opponentRating = opponent?.rating ?? 1500;
+        const timeLeft = opponentTimeLeftRef.current; // stable ref, not reactive
 
         // Base time: 1-8 seconds depending on number of legal moves
         let delay = 1000 + (legalMoves / 40) * 3000;
@@ -101,9 +111,9 @@ export function GameScreen({ onBack }: Props) {
           delay *= tcFactor;
 
           // Time pressure: speed up significantly when low
-          if (opponentTimeLeft < 10) delay = Math.min(delay, 100 + Math.random() * 300);
-          else if (opponentTimeLeft < 30) delay = Math.min(delay, 300 + Math.random() * 700);
-          else if (opponentTimeLeft < 60) delay *= 0.5;
+          if (timeLeft < 10) delay = Math.min(delay, 150 + Math.random() * 250);
+          else if (timeLeft < 30) delay = Math.min(delay, 400 + Math.random() * 600);
+          else if (timeLeft < 60) delay *= 0.5;
         }
 
         // Random jitter ±30%
@@ -119,7 +129,8 @@ export function GameScreen({ onBack }: Props) {
         return () => clearTimeout(timer);
       }
     }
-  }, [prediction, chess, playerColor, applyPredictedMove, timeControl, opponentTimeLeft, addIncrement, flagGameOver, opponent, moveHistory]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prediction, flagGameOver, chess, playerColor, applyPredictedMove, timeControl, addIncrement, opponent, moveHistory]);
 
   // Auto-predict after the player makes a move, and add increment to player's clock
   useEffect(() => {
@@ -187,6 +198,22 @@ export function GameScreen({ onBack }: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h2v8H3zM8 9h2v12H8zM13 5h2v16h-2zM18 1h2v20h-2z" />
               </svg>
               <span className="hidden sm:inline">Eval</span>
+            </button>
+
+            {/* Arrows toggle */}
+            <button
+              onClick={() => setShowArrows(!showArrows)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 ${
+                showArrows
+                  ? "text-zinc-300 bg-white/[0.06]"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]"
+              }`}
+              title={showArrows ? "Hide move arrows" : "Show move arrows"}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
+              <span className="hidden sm:inline">Arrows</span>
             </button>
 
             {/* Graph toggle */}

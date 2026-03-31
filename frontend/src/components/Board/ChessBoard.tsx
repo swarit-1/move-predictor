@@ -21,6 +21,7 @@ export function ChessBoard() {
   const playerTimeLeft = useGameStore((s) => s.playerTimeLeft);
   const opponentTimeLeft = useGameStore((s) => s.opponentTimeLeft);
   const tickClock = useGameStore((s) => s.tickClock);
+  const showArrows = useGameStore((s) => s.showArrows);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [boardSize, setBoardSize] = useState(MAX_BOARD_SIZE);
@@ -39,7 +40,7 @@ export function ChessBoard() {
   }, []);
 
   const customArrows: [Square, Square, string][] = [];
-  if (prediction && viewIndex === -1) {
+  if (showArrows && prediction && viewIndex === -1) {
     if (prediction.engineBest) {
       const from = prediction.engineBest.slice(0, 2) as Square;
       const to = prediction.engineBest.slice(2, 4) as Square;
