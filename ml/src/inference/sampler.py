@@ -81,10 +81,17 @@ def compute_temperature(
     if style is None:
         style = StyleOverrides()
 
-    # Base temperature from rating — wider separation so low-rated players
-    # deviate significantly more than high-rated ones.
-    # Rating 800 → ~0.94, Rating 1500 → ~0.62, Rating 2400 → ~0.21
-    rating_temp = max(0.20, 1.3 - (player_rating / 2200.0))
+    # Base temperature from rating — piecewise for wider separation.
+    # Rating 800 → ~1.10, Rating 1200 → ~0.82, Rating 1500 → ~0.60,
+    # Rating 1800 → ~0.40, Rating 2200 → ~0.22, Rating 2500 → ~0.15
+    if player_rating >= 2200:
+        rating_temp = max(0.15, 0.45 - (player_rating - 2200) / 3000.0)
+    elif player_rating >= 1600:
+        rating_temp = 0.45 + (2200 - player_rating) / 2000.0  # 0.45→0.75
+    elif player_rating >= 1000:
+        rating_temp = 0.75 + (1600 - player_rating) / 2000.0  # 0.75→1.05
+    else:
+        rating_temp = 1.05 + (1000 - player_rating) / 1500.0  # 1.05→1.72
 
     # Error adjustment — contributes meaningfully to temperature
     error_temp = 0.3 * predicted_cpl + 0.2 * blunder_prob
@@ -101,9 +108,10 @@ def compute_temperature(
     if time_pressure > 0:
         temperature *= (1.0 + 0.5 * time_pressure)
 
-    # Rating-dependent ceiling: low-rated players can reach higher temperatures
-    ceiling = 1.5 if player_rating < 1200 else 1.2 if player_rating < 1800 else 1.0
-    return max(0.25, min(ceiling, temperature))
+    # Rating-dependent ceiling and floor
+    ceiling = 1.5 if player_rating < 1200 else 1.2 if player_rating < 1800 else 0.8
+    floor = 0.15 if player_rating >= 2200 else 0.25
+    return max(floor, min(ceiling, temperature))
 
 
 def apply_style_bias(
@@ -300,13 +308,15 @@ def sample_move(
     # Rating-dependent probability floor: higher-rated players never play
     # moves that are correct less than a certain fraction of the time.
     if player_rating >= 2200:
-        min_prob = 0.03   # 3% — only top ~5-8 moves survive
-    elif player_rating >= 1600:
+        min_prob = 0.04   # 4% — only top ~4-6 moves survive
+    elif player_rating >= 1800:
+        min_prob = 0.025  # 2.5%
+    elif player_rating >= 1400:
         min_prob = 0.015  # 1.5%
-    elif player_rating >= 1200:
+    elif player_rating >= 1000:
         min_prob = 0.008  # 0.8%
     else:
-        min_prob = 0.003  # 0.3% — allow more variety for beginners
+        min_prob = 0.004  # 0.4% — allow more variety for beginners
 
     probs[probs < min_prob] = 0.0
     prob_sum = probs.sum()
@@ -317,9 +327,9 @@ def sample_move(
     # probability after all filtering, play it directly (argmax).
     # This prevents 2400+ players from "randomly" deviating from clear best moves.
     top1_prob = probs.max().item()
-    if player_rating >= 2200 and top1_prob >= 0.60:
+    if player_rating >= 2200 and top1_prob >= 0.55:
         move_idx = probs.argmax().item()
-    elif player_rating >= 1800 and top1_prob >= 0.75:
+    elif player_rating >= 1800 and top1_prob >= 0.70:
         move_idx = probs.argmax().item()
     else:
         # Sample from the filtered distribution

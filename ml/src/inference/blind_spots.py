@@ -56,21 +56,24 @@ class BlindSpotConfig:
         """
         weakness = max(0.0, min(1.0, (2400 - rating) / 1800))
 
-        # Time pressure amplifies blind spots (up to 50% stronger)
-        pressure_mult = 1.0 + 0.5 * time_pressure
+        # Time pressure amplifies blind spots (up to 40% stronger)
+        pressure_mult = 1.0 + 0.4 * time_pressure
 
-        # At rating 2400+: all biases ≤ 0.05
-        # At rating 1800: biases ~0.2-0.3
-        # At rating 1200: biases ~0.5-0.7
-        # At rating 800: biases ~0.8-1.0
+        # Scaled so that at 1500 (weakness ~0.5), biases are SUBTLE:
+        # tactical_blindness ~0.4 → penalty on quiet best = -0.4*4 = -1.6 (nudge, not override)
+        # At rating 2200+: all biases near zero
+        # At rating 1800: biases ~0.15-0.25
+        # At rating 1500: biases ~0.25-0.40 (mistakes from picking move #2-3)
+        # At rating 1200: biases ~0.40-0.55
+        # At rating 800: biases ~0.55-0.80
         return cls(
-            tactical_blindness=weakness * 1.0 * pressure_mult,
-            material_greed=weakness * 0.8 * pressure_mult,
-            check_attraction=weakness * 0.7 * pressure_mult,
-            piece_preference=weakness * 0.4 * pressure_mult,
-            king_safety_neglect=weakness * 0.7 * pressure_mult,
-            long_range_blindness=weakness * 0.9 * pressure_mult,
-            king_attack_neglect=weakness * 0.8 * pressure_mult,
+            tactical_blindness=weakness * 0.80 * pressure_mult,
+            material_greed=weakness * 0.60 * pressure_mult,
+            check_attraction=weakness * 0.45 * pressure_mult,
+            piece_preference=weakness * 0.30 * pressure_mult,
+            king_safety_neglect=weakness * 0.50 * pressure_mult,
+            long_range_blindness=weakness * 0.70 * pressure_mult,
+            king_attack_neglect=weakness * 0.55 * pressure_mult,
         )
 
 
