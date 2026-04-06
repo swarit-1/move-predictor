@@ -11,9 +11,6 @@ export function usePrediction() {
   const fetchPrediction = useCallback(async () => {
     if (isLoading) return;
 
-    // Don't keep hammering a dead backend
-    if (predictionError) return;
-
     setLoading(true);
     try {
       // Use playerKey from profile (set by ML service), or build from source:username
@@ -58,9 +55,9 @@ export function usePrediction() {
       const status = error?.response?.status;
 
       if (code === "ECONNREFUSED" || code === "ERR_NETWORK" || status === 502 || status === 503) {
-        setPredictionError("ML service is not running. Predictions are disabled.");
+        setPredictionError("ML service is not running. Will retry on next move.");
       } else if (status === 500) {
-        setPredictionError("ML service error. Predictions are disabled until you retry.");
+        setPredictionError("ML service error. Will retry on next move.");
       } else {
         console.error("Prediction failed:", error?.message || error);
       }

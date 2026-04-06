@@ -11,7 +11,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import { config, logger } from "./config";
 
 const app = express();
-const PORT = parseInt(process.env.BACKEND_PORT || "3000", 10);
+const PORT = parseInt(process.env.BACKEND_PORT || "3001", 10);
 const startTime = Date.now();
 
 // Middleware

@@ -9,6 +9,7 @@ from src.api.predict import router as predict_router
 from src.api.analyze import router as analyze_router
 from src.api.players import router as players_router
 from src.api.training import router as training_router
+from src.api.review import router as review_router
 
 
 @asynccontextmanager
@@ -39,3 +40,4 @@ app.include_router(predict_router, prefix="/ml")
 app.include_router(analyze_router, prefix="/ml")
 app.include_router(players_router, prefix="/ml")
 app.include_router(training_router, prefix="/ml")
+app.include_router(review_router, prefix="/ml")

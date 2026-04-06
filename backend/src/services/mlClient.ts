@@ -101,6 +101,16 @@ class MLClient {
     return response.data;
   }
 
+  async reviewGame(params: {
+    moves: string[];
+    depth?: number;
+  }): Promise<any> {
+    const response = await this.client.post("/ml/review", params, {
+      timeout: 120000, // 2 minutes — full game analysis is slow
+    });
+    return response.data;
+  }
+
   async startTraining(params: {
     phase: number;
     data_path?: string;

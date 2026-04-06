@@ -38,6 +38,7 @@ The system fetches real player games from Lichess and Chess.com, builds per-play
   - [Prediction Request/Response](#prediction-requestresponse)
   - [Simulation Sessions](#simulation-sessions)
 - [Frontend Features](#frontend-features)
+  - [Game Review](#game-review)
 - [Configuration Reference](#configuration-reference)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -589,7 +590,7 @@ curl -X POST http://localhost:3000/api/predict \
 
 ## API Reference
 
-### Backend Gateway (Port 3000)
+### Backend Gateway (Port 3001)
 
 All responses follow `{ success: boolean, data?: T, error?: string }`.
 
@@ -613,6 +614,7 @@ All responses follow `{ success: boolean, data?: T, error?: string }`.
 |--------|----------|------|-------------|
 | `POST` | `/api/predict` | See [schema below](#prediction-requestresponse) | Get human move prediction |
 | `POST` | `/api/predict/analyze` | `{ fen: string, depth?: number }` | Get raw Stockfish analysis |
+| `POST` | `/api/predict/review` | `{ moves: string[], depth?: number }` | Full game review with per-move analysis |
 
 #### Simulation
 
@@ -636,6 +638,7 @@ Internal service — the Node.js gateway is the only expected consumer.
 |--------|----------|-------------|
 | `POST` | `/ml/predict` | Raw model inference |
 | `POST` | `/ml/analyze` | Stockfish position analysis |
+| `POST` | `/ml/review` | Full game review (parallel Stockfish analysis) |
 | `POST` | `/ml/player/build-profile` | Build player embedding from games |
 | `GET` | `/ml/player/:id/stats` | Get player statistics |
 | `POST` | `/ml/training/start` | Trigger training job |
@@ -721,7 +724,7 @@ curl http://localhost:3000/api/simulate/<session_id>
 
 ## Frontend Features
 
-The React frontend (Vite + Tailwind CSS + Zustand) features a dark-themed UI with five game modes accessible from the Welcome Screen:
+The React frontend (Vite + Tailwind CSS + Zustand) features a dark-themed UI with multiple game modes accessible from the Welcome Screen, plus a post-game review feature:
 
 ### Welcome Screen
 Three mode cards with descriptions and icons:
@@ -746,7 +749,7 @@ Three mode cards with descriptions and icons:
 - **Analysis Panel** — Shows prediction confidence, sampling temperature, centipawn loss, blunder probability, move distribution chart (Recharts), and human-readable explanations for move choices.
 - **Style Panel** — In-game adjustable style sliders (aggression, risk-taking, blunder rate) accessible from the header.
 - **Error Handling** — Graceful error banners when the ML service is unreachable, with a retry button. Predictions stop retrying on connection failure to avoid spam.
-- **Game Controls** — Undo, reset, and game-over detection with modal.
+- **Game Controls** — Undo, reset, and game-over detection with modal. The game over modal offers a "Review" button that launches full Stockfish analysis of the game.
 - **Move List** — Scrollable, clickable move list with move navigation. Click any move to view that position on the board (turn indicator updates correctly when viewing history).
 - **Opponent Badge** — Compact display of the current opponent's profile in the game header.
 
@@ -759,6 +762,17 @@ Three mode cards with descriptions and icons:
 ### Replay Mode
 - **Famous Games** — Step through classic games move by move.
 - **Fork & Explore** — Fork at any point and play out "what if" scenarios where the AI takes over as either side.
+
+### Game Review
+Chess.com-style post-game analysis accessible from the game over modal. Submits all moves to Stockfish for parallel analysis and returns per-move annotations with accuracy scores.
+
+- **Per-Move Classification** — Every move is classified as Best, Excellent, Good, Inaccuracy, Mistake, or Blunder based on centipawn loss thresholds (0, 10, 25, 50, 100 CPL). Opening moves (first 16 half-moves) are marked as Book.
+- **Accuracy Score** — Per-player accuracy computed using Chess.com's formula: `103.1668 * exp(-0.04354 * ACPL) - 3.1668`. Displayed as an animated SVG ring with color coding (green ≥90, yellow ≥70, orange ≥50, red <50).
+- **Move Breakdown** — Category counts for each player (best+excellent, good, inaccuracy, mistake, blunder) with average centipawn loss.
+- **Interactive Board** — Navigate through the game with arrow keys, Home/End, or clickable navigation buttons. The board shows color-coded arrows: played move in classification color, engine best move in blue (when different).
+- **Move Detail Panel** — For the selected move, shows classification badge, eval before/after, CPL bar, best move comparison, and engine top 3 lines with evaluations.
+- **Annotated Move List** — Paired white/black moves with classification badges (colored circles with symbols: !! for best, ?! for inaccuracy, ? for mistake, ?? for blunder). Notable moves highlighted with colored left borders. Auto-scrolls to the selected move.
+- **Stockfish Analysis** — Uses depth-18 parallel analysis across all positions via the Stockfish process pool. Top 3 engine lines shown per position with centipawn or mate scores.
 
 ### Player Profile Display
 - **Style Visualization** — Bar chart showing Aggression, Tactical tendency, Accuracy, Consistency, and Opening Variety.

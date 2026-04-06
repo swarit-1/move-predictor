@@ -3,9 +3,10 @@ import { useGameStore } from "../../store/gameStore";
 
 interface Props {
   onNewGame: () => void;
+  onReview: () => void;
 }
 
-export function GameOverModal({ onNewGame }: Props) {
+export function GameOverModal({ onNewGame, onReview }: Props) {
   const chess = useGameStore((s) => s.chess);
   const playerColor = useGameStore((s) => s.playerColor);
   const moveHistory = useGameStore((s) => s.moveHistory);
@@ -115,7 +116,7 @@ export function GameOverModal({ onNewGame }: Props) {
             New Game
           </button>
           <button
-            onClick={() => setDismissed(true)}
+            onClick={onReview}
             className="flex-1 py-3 bg-white/[0.05] hover:bg-white/[0.08] rounded-xl text-sm font-medium
                        text-zinc-300 transition-all duration-200 border border-white/[0.06]"
           >

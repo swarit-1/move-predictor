@@ -18,9 +18,10 @@ import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 
 interface Props {
   onBack: () => void;
+  onReview: () => void;
 }
 
-export function GameScreen({ onBack }: Props) {
+export function GameScreen({ onBack, onReview }: Props) {
   const moveHistory = useGameStore((s) => s.moveHistory);
   const chess = useGameStore((s) => s.chess);
   const playerColor = useGameStore((s) => s.playerColor);
@@ -278,7 +279,7 @@ export function GameScreen({ onBack }: Props) {
       </main>
 
       {/* Game over modal */}
-      <GameOverModal onNewGame={onBack} />
+      <GameOverModal onNewGame={onBack} onReview={onReview} />
     </div>
   );
 }

@@ -4,13 +4,17 @@ import { SetupScreen } from "./components/Setup/SetupScreen";
 import { GameScreen } from "./components/Game/GameScreen";
 import { ReplayScreen } from "./components/Replay/ReplayScreen";
 import { PracticeScreen } from "./components/Practice/PracticeScreen";
+import { ReviewScreen } from "./components/Review/ReviewScreen";
 import { useGameStore } from "./store/gameStore";
+import { useReviewStore } from "./store/reviewStore";
 
-type AppPhase = "welcome" | "setup" | "playing" | "replay" | "practice";
+type AppPhase = "welcome" | "setup" | "playing" | "replay" | "practice" | "review";
 
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>("welcome");
   const resetGame = useGameStore((s) => s.resetGame);
+  const setGameData = useReviewStore((s) => s.setGameData);
+  const resetReview = useReviewStore((s) => s.resetReview);
 
   const handlePlay = useCallback(() => {
     setPhase("setup");
@@ -32,6 +36,13 @@ export default function App() {
   const handleBackToWelcome = useCallback(() => {
     setPhase("welcome");
   }, []);
+
+  const handleReview = useCallback(() => {
+    const { moveHistory, playerColor } = useGameStore.getState();
+    resetReview();
+    setGameData(moveHistory, playerColor);
+    setPhase("review");
+  }, [resetReview, setGameData]);
 
   if (phase === "welcome") {
     return (
@@ -60,5 +71,9 @@ export default function App() {
     );
   }
 
-  return <GameScreen onBack={handleBackToWelcome} />;
+  if (phase === "review") {
+    return <ReviewScreen onBack={handleBackToWelcome} />;
+  }
+
+  return <GameScreen onBack={handleBackToWelcome} onReview={handleReview} />;
 }

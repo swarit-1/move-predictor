@@ -51,6 +51,13 @@ export async function analyzePosition(fen: string, depth = 18) {
   return data;
 }
 
+export async function reviewGame(moves: string[], depth = 18) {
+  const { data } = await api.post("/predict/review", { moves, depth }, {
+    timeout: 120000, // 2 minutes — full game analysis
+  });
+  return data;
+}
+
 // ── Players ──────────────────────────────────────────────────────
 export async function buildPlayerProfile(
   source: "lichess" | "chesscom",

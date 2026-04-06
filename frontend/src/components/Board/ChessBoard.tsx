@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Chessboard } from "react-chessboard";
 import { useChessGame } from "../../hooks/useChessGame";
 import { useGameStore } from "../../store/gameStore";
@@ -6,6 +6,7 @@ import { usePlayerStore } from "../../store/playerStore";
 import { CapturedPieces } from "./CapturedPieces";
 import { GameClock } from "./GameClock";
 import type { Square, Piece } from "react-chessboard/dist/chessboard/types";
+import { Chess } from "chess.js";
 
 const MAX_BOARD_SIZE = 640;
 const MIN_BOARD_SIZE = 320;
@@ -25,6 +26,10 @@ export function ChessBoard() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [boardSize, setBoardSize] = useState(MAX_BOARD_SIZE);
+
+  // Click-to-select state: track which square is selected and its legal destinations
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const [legalMoveSquares, setLegalMoveSquares] = useState<Record<string, React.CSSProperties>>({});
 
   useEffect(() => {
     function updateSize() {
@@ -57,11 +62,83 @@ export function ChessBoard() {
     (playerColor === "w" && turn === "white") ||
     (playerColor === "b" && turn === "black");
 
+  const isViewingHistory = viewIndex !== -1;
+
+  // Clear selection whenever fen changes (opponent moved, or player moved)
+  useEffect(() => {
+    setSelectedSquare(null);
+    setLegalMoveSquares({});
+  }, [fen]);
+
+  const selectSquare = useCallback((square: Square, chess: Chess) => {
+    const moves = chess.moves({ square, verbose: true });
+    if (moves.length === 0) return;
+
+    setSelectedSquare(square);
+
+    const styles: Record<string, React.CSSProperties> = {
+      [square]: { background: "rgba(74, 222, 128, 0.25)" },
+    };
+
+    moves.forEach((m) => {
+      const occupied = chess.get(m.to as Square);
+      const isCapture = !!occupied || m.flags.includes("e");
+      styles[m.to] = isCapture
+        ? {
+            background:
+              "radial-gradient(circle, transparent 58%, rgba(74,222,128,0.55) 60%, rgba(74,222,128,0.55) 75%, transparent 77%)",
+          }
+        : {
+            background:
+              "radial-gradient(circle, rgba(74,222,128,0.55) 28%, transparent 30%)",
+          };
+    });
+
+    setLegalMoveSquares(styles);
+  }, []);
+
+  const handleSquareClick = useCallback((square: Square) => {
+    if (isViewingHistory || isGameOver) return;
+
+    const chess = new Chess(fen);
+    const piece = chess.get(square);
+
+    if (selectedSquare) {
+      if (square === selectedSquare) {
+        setSelectedSquare(null);
+        setLegalMoveSquares({});
+        return;
+      }
+
+      // Destination is a legal move → click-to-move
+      if (legalMoveSquares[square] !== undefined) {
+        onPieceDrop(selectedSquare, square, "" as Piece);
+        setSelectedSquare(null);
+        setLegalMoveSquares({});
+        return;
+      }
+
+      // Clicking another friendly piece → re-select
+      if (piece && piece.color === playerColor) {
+        selectSquare(square, chess);
+        return;
+      }
+
+      setSelectedSquare(null);
+      setLegalMoveSquares({});
+      return;
+    }
+
+    // Nothing selected: pick up a friendly piece on our turn
+    if (piece && piece.color === playerColor && isPlayerTurn) {
+      selectSquare(square, chess);
+    }
+  }, [selectedSquare, legalMoveSquares, fen, isPlayerTurn, isViewingHistory, isGameOver, playerColor, onPieceDrop, selectSquare]);
+
   const onFlag = useGameStore((s) => s.onFlag);
   const flagGameOver = useGameStore((s) => s.flagGameOver);
 
   const opponentName = opponent?.username ?? "Opponent";
-  const isViewingHistory = viewIndex !== -1;
   const hasClock = timeControl !== null && timeControl.initial > 0;
   const anyGameOver = isGameOver || !!flagGameOver;
   const opponentClockRunning = hasClock && !isPlayerTurn && !anyGameOver && !isViewingHistory;
@@ -112,13 +189,23 @@ export function ChessBoard() {
       <div className="rounded-lg shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]" style={{ position: "relative", zIndex: 10 }}>
         <Chessboard
           position={fen}
+          onSquareClick={handleSquareClick}
           onPieceDrop={(src, tgt, piece) => {
             if (isViewingHistory) return false;
-            // Non-promotion moves go through directly
+            setSelectedSquare(null);
+            setLegalMoveSquares({});
             return onPieceDrop(src, tgt, piece);
           }}
+          onPieceDragBegin={(_piece, square) => {
+            // Show legal moves while dragging too
+            const chess = new Chess(fen);
+            selectSquare(square as Square, chess);
+          }}
+          onPieceDragEnd={() => {
+            setSelectedSquare(null);
+            setLegalMoveSquares({});
+          }}
           onPromotionCheck={(sourceSquare, targetSquare, piece) => {
-            // Check if a pawn is reaching the last rank
             return (
               piece[1] === "P" &&
               ((piece[0] === "w" && targetSquare[1] === "8") ||
@@ -136,6 +223,7 @@ export function ChessBoard() {
             }
             return false;
           }}
+          customSquareStyles={legalMoveSquares}
           customArrows={customArrows}
           boardWidth={boardSize}
           boardOrientation={playerColor === "w" ? "white" : "black"}

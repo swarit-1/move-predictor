@@ -125,14 +125,14 @@ done
 
 # ── Start backend ───────────────────────────────────────────
 
-echo -e "${BLUE}Starting backend on :3000...${NC}"
+echo -e "${BLUE}Starting backend on :3001...${NC}"
 cd "$ROOT_DIR/backend"
 npx tsx watch src/index.ts > "$LOG_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
 
 echo -n "  Waiting for backend"
 for i in $(seq 1 15); do
-  if curl -s http://localhost:3000/api/health >/dev/null 2>&1; then
+  if curl -s http://localhost:3001/api/health >/dev/null 2>&1; then
     echo -e " ${GREEN}ready${NC}"
     break
   fi
@@ -160,7 +160,7 @@ echo -e "${GREEN}  All services running!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "  Frontend:  ${BLUE}http://localhost:5173${NC}"
-echo -e "  Backend:   ${BLUE}http://localhost:3000${NC}"
+echo -e "  Backend:   ${BLUE}http://localhost:3001${NC}"
 echo -e "  ML Service:${BLUE} http://localhost:8000${NC}"
 echo ""
 echo -e "  Logs: $LOG_DIR/"

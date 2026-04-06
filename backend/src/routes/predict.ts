@@ -77,6 +77,11 @@ const analyzeSchema = z.object({
   num_lines: z.number().int().min(1).max(10).optional().default(5),
 });
 
+const reviewSchema = z.object({
+  moves: z.array(z.string().min(4).max(5)).min(1).max(500),
+  depth: z.number().int().min(1).max(24).optional().default(18),
+});
+
 /**
  * POST /api/predict
  * Get a human move prediction for a position.
@@ -135,6 +140,26 @@ predictRouter.post("/analyze", async (req: Request, res: Response) => {
     res.json({ success: true, data: analysis });
   } catch (error: any) {
     logger.error("Analysis failed", { error: error.message });
+    const status = error.name === "ZodError" ? 400 : 503;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/predict/review
+ * Full game review — analyzes every move and classifies them.
+ * Returns per-move annotations + per-player accuracy.
+ */
+predictRouter.post("/review", async (req: Request, res: Response) => {
+  try {
+    const params = reviewSchema.parse(req.body);
+    const review = await mlClient.reviewGame({
+      moves: params.moves,
+      depth: params.depth,
+    });
+    res.json({ success: true, data: review });
+  } catch (error: any) {
+    logger.error("Game review failed", { error: error.message });
     const status = error.name === "ZodError" ? 400 : 503;
     res.status(status).json({ success: false, error: error.message });
   }
