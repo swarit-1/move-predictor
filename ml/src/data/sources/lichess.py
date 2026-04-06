@@ -40,7 +40,7 @@ async def fetch_player_games(
         "rated": str(rated_only).lower(),
         "pgnInJson": "false",
         "clocks": "true",
-        "evals": "false",
+        "evals": "true",   # include [%eval X.XX] annotations for CPL computation
         "opening": "true",
     }
     if perf_type:

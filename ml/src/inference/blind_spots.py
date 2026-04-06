@@ -211,7 +211,22 @@ def _apply_material_greed(
     board: chess.Board,
     strength: float,
 ) -> tuple[torch.Tensor, bool]:
-    """Boost captures proportional to captured piece value."""
+    """Boost captures proportional to captured piece value.
+
+    Models human tendency to take material without fully calculating
+    whether the capturing piece will be recaptured.
+
+    The "undefended" bonus is computed POST-capture (not pre-capture).
+    Pre-capture check was wrong: a pawn blocking a rook looks "undefended"
+    before the queen takes it, then the rook recaptures — causing queen
+    sacrifices for pawns. Post-capture check correctly identifies truly
+    free material vs. greedy losses.
+
+    Bonus tiers:
+    - Free capture (not recapturable): big boost (humans love free material)
+    - Winning trade (recaptured but we gained): moderate boost
+    - Losing trade (greedy blunder): small boost (models missing the recapture)
+    """
     delta = torch.zeros_like(logits)
     fired = False
 
@@ -228,12 +243,30 @@ def _apply_material_greed(
             continue
 
         captured = board.piece_at(move.to_square)
-        if captured:
-            value = piece_values.get(captured.piece_type, 0)
-            bonus = strength * (1.5 + value * 0.6)
+        mover = board.piece_at(move.from_square)
 
-            if not board.is_attacked_by(not board.turn, move.to_square):
-                bonus *= 2.0
+        if captured and mover:
+            captured_val = piece_values.get(captured.piece_type, 0)
+            mover_val = piece_values.get(mover.piece_type, 0)
+
+            # Check if destination will be attacked AFTER the capture.
+            # board_after has the captured piece removed and the mover on to_square.
+            board_after = board.copy()
+            board_after.push(move)
+            will_be_recaptured = board_after.is_attacked_by(
+                board_after.turn, move.to_square
+            )
+
+            if not will_be_recaptured:
+                # Truly free capture — the piece is undefended after we take
+                bonus = strength * (1.5 + captured_val * 0.6) * 2.0
+            elif mover_val <= captured_val:
+                # Winning or equal trade (recaptured but we came out ahead)
+                bonus = strength * (1.0 + (captured_val - mover_val) * 0.3)
+            else:
+                # Losing exchange: we grab a less valuable piece and lose ours.
+                # Small boost models greed blindness (missing the recapture).
+                bonus = strength * 0.5
 
             idx = _encode_safe(move, board)
             if idx is not None:

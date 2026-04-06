@@ -122,9 +122,10 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
         except Exception:
             continue
 
-    # Register the book with the prediction pipeline
+    # Register the book and stats with the prediction pipeline
     player_key = f"{request.source}:{request.username}".lower()
     prediction_pipeline.set_opening_book(player_key, book)
+    prediction_pipeline.set_player_stats(player_key, stats.to_vector())
     logger.info(
         "Built opening book for %s: %d games, %d nodes",
         player_key, book.total_games, book.size,

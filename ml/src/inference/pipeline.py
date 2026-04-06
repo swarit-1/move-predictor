@@ -38,6 +38,7 @@ class PredictionPipeline:
         self.device = torch.device("cpu")
         self.has_checkpoint = False
         self.opening_books: dict[str, OpeningBook] = {}  # player_key → book
+        self.player_stats: dict[str, np.ndarray] = {}   # player_key → stats vector
 
     def load_model(self, checkpoint_path: str | None = None):
         """Load model from checkpoint or initialize fresh."""
@@ -96,6 +97,11 @@ class PredictionPipeline:
             player_key, book.total_games, book.size,
         )
 
+    def set_player_stats(self, player_key: str, stats: np.ndarray) -> None:
+        """Store a player's computed stats vector for use in future predictions."""
+        self.player_stats[player_key] = stats
+        logger.info("Stored player stats for %s (%d features)", player_key, len(stats))
+
     @torch.no_grad()
     async def predict(
         self,
@@ -115,6 +121,18 @@ class PredictionPipeline:
 
         board = chess.Board(fen)
 
+        # Retrieve stored player stats if not explicitly provided
+        if player_stats is None and player_key and player_key in self.player_stats:
+            player_stats = self.player_stats[player_key]
+            logger.debug("Using stored stats for %s", player_key)
+
+        # Derive style from player stats when no explicit overrides are set.
+        # This makes the prediction reflect the player's actual playing style
+        # (aggression, blunder frequency, consistency) learned from their games.
+        if style is None and player_stats is not None:
+            style = _stats_to_style(player_stats)
+            logger.debug("Derived style from player stats: %s", style)
+
         # Look up opening book probabilities
         opening_book_probs: dict[str, float] | None = None
         if player_key and player_key in self.opening_books and move_history:
@@ -130,7 +148,7 @@ class PredictionPipeline:
         else:
             return await self._predict_with_data(
                 board, player_rating, style, engine_top_moves,
-                opening_book_probs, player_key, time_pressure,
+                opening_book_probs, player_key, time_pressure, player_stats,
             )
 
     def _predict_with_model(
@@ -197,6 +215,7 @@ class PredictionPipeline:
         opening_book_probs: dict[str, float] | None = None,
         player_key: str | None = None,
         time_pressure: float = 0.0,
+        player_stats: np.ndarray | None = None,
     ) -> SampledMove:
         """Predict using real human data when available, falling back to Stockfish.
 
@@ -255,9 +274,22 @@ class PredictionPipeline:
             source, player_rating, board.fen()[:50],
         )
 
-        # Step 4: Estimate error metrics from rating
-        estimated_cpl = max(0.0, 3.0 - player_rating * 0.0012)
-        estimated_blunder = max(0.02, 0.35 - player_rating * 0.00012)
+        # Step 4: Estimate error metrics.
+        # Use player's actual computed CPL/blunder_rate when available (from build_player_profile),
+        # falling back to rating-based formula for unknown players.
+        # Stats vector indices: [2] = avg_centipawn_loss / 200.0, [3] = blunder_rate
+        if (
+            player_stats is not None
+            and float(player_stats[2]) != 50.0 / 200.0  # not the default
+        ):
+            estimated_cpl = float(player_stats[2]) * 200.0  # denormalize
+            estimated_blunder = float(player_stats[3])
+            logger.debug(
+                "Using player stats CPL=%.1f blunder=%.3f", estimated_cpl, estimated_blunder
+            )
+        else:
+            estimated_cpl = max(0.0, 3.0 - player_rating * 0.0012)
+            estimated_blunder = max(0.02, 0.35 - player_rating * 0.00012)
 
         if style:
             estimated_cpl *= (0.5 + style.blunder_frequency / 100.0)
@@ -559,6 +591,26 @@ class PredictionPipeline:
         indices[start:] = recent
 
         return indices
+
+
+def _stats_to_style(stats: np.ndarray) -> StyleOverrides:
+    """Derive StyleOverrides from a player stats vector.
+
+    Stats vector layout (see player_stats.py PlayerStats.to_vector()):
+      [3]  blunder_rate       → blunder_frequency (0-100)
+      [4]  aggression_index   → aggression (0-100)
+      [10] consistency        → inverse maps to risk_taking (0-100)
+    """
+    aggression = float(stats[4]) * 100.0           # aggression_index is 0-1
+    blunder_frequency = float(stats[3]) * 100.0    # blunder_rate is 0-1
+    consistency = float(stats[10])                 # 0=wild, 1=very consistent
+    risk_taking = (1.0 - consistency) * 100.0      # low consistency → high risk
+
+    return StyleOverrides(
+        aggression=max(0.0, min(100.0, aggression)),
+        risk_taking=max(0.0, min(100.0, risk_taking)),
+        blunder_frequency=max(0.0, min(100.0, blunder_frequency)),
+    )
 
 
 # Global singleton

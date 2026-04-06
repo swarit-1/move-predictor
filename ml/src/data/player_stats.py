@@ -3,6 +3,7 @@
 These stats feed into the player embedding as continuous features.
 """
 
+import re
 import numpy as np
 import chess
 import chess.pgn
@@ -108,6 +109,10 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
     openings: list[str] = []
     endgame_results: list[bool] = []  # True = won/drew from endgame, False = lost
     all_ratings: list[float] = []  # Collect ratings to average (not just take last)
+    # CPL tracking from Lichess [%eval] annotations (only populated when evals=true)
+    total_cpl = 0.0
+    cpl_count = 0
+    blunder_count = 0  # moves with CPL > 100
 
     CENTER_SQUARES = {chess.E4, chess.D4, chess.E5, chess.D5,
                       chess.C3, chess.D3, chess.E3, chess.F3,
@@ -148,6 +153,7 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
         last_capture_square: int | None = None
         reached_endgame = False
         endgame_started_winning = False
+        prev_eval: float | None = None  # eval (from white's POV) before current move
 
         for node in game.mainline():
             move = node.move
@@ -219,6 +225,25 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
             else:
                 last_capture_square = None
 
+            # Parse Lichess [%eval X.XX] annotation (present when evals=true).
+            # The annotation in node.comment is the eval AFTER this move.
+            # Lichess evals are always from White's perspective.
+            eval_after = _parse_eval_annotation(node.comment)
+            if is_player_move and prev_eval is not None and eval_after is not None:
+                if is_white:
+                    # Good white move: eval rises. CPL = how much it dropped.
+                    cpl = max(0.0, (prev_eval - eval_after) * 100)
+                else:
+                    # Good black move: eval falls (more negative). CPL = how much it rose.
+                    cpl = max(0.0, (eval_after - prev_eval) * 100)
+                clamped = min(cpl, 500.0)
+                total_cpl += clamped
+                cpl_count += 1
+                if clamped > 100:
+                    blunder_count += 1
+            if eval_after is not None:
+                prev_eval = eval_after
+
             board.push(move)
 
         game_lengths.append(board.fullmove_number)
@@ -282,6 +307,11 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
     elif len(game_capture_rates) > 0:
         stats.consistency = 0.5  # Not enough data
 
+    # Accuracy from Lichess eval annotations (only set when evals were fetched)
+    if cpl_count > 0:
+        stats.avg_centipawn_loss = total_cpl / cpl_count
+        stats.blunder_rate = blunder_count / cpl_count
+
     # Endgame stats
     if endgame_results:
         stats.endgame_conversion = sum(endgame_results) / len(endgame_results)
@@ -315,3 +345,32 @@ def _piece_value(piece_type: int | None) -> int:
         chess.QUEEN: 9,
         chess.KING: 0,
     }.get(piece_type, 0)
+
+
+def _parse_eval_annotation(comment: str) -> float | None:
+    """Parse a Lichess [%eval X.XX] annotation from a PGN move comment.
+
+    Lichess includes engine evaluations in move comments when evals=true is
+    requested. The eval is always from White's perspective.
+
+    Returns the eval as a float (centipawns / 100), or None if not present
+    or if it's a mate score (which can't be used for CPL computation).
+
+    Examples:
+        "{ [%eval 0.17] [%clk 0:09:55] }" → 0.17
+        "{ [%eval -1.30] }"               → -1.30
+        "{ [%eval #3] }"                  → None  (mate score, skip)
+        ""                                → None
+    """
+    if not comment:
+        return None
+    match = re.search(r'\[%eval\s+([^\]]+)\]', comment)
+    if not match:
+        return None
+    val = match.group(1).strip()
+    if val.startswith('#') or val.startswith('-#'):
+        return None  # Mate score — skip, can't compute meaningful CPL
+    try:
+        return float(val)
+    except ValueError:
+        return None
