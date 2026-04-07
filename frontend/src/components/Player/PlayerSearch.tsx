@@ -4,11 +4,12 @@ import { usePlayerProfile } from "../../hooks/usePlayerProfile";
 export function PlayerSearch() {
   const [source, setSource] = useState<"lichess" | "chesscom">("lichess");
   const [username, setUsername] = useState("");
+  const [timeControl, setTimeControl] = useState<string | null>(null);
   const { opponentLoading, error, fetchProfile } = usePlayerProfile();
 
   const handleSearch = () => {
     if (username.trim()) {
-      fetchProfile(source, username.trim());
+      fetchProfile(source, username.trim(), timeControl);
     }
   };
 

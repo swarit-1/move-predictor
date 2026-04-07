@@ -1,6 +1,6 @@
 """Multi-task output heads: Policy, Value, and Error.
 
-Policy Head:  Predicts move probability distribution over 1968-move vocabulary.
+Policy Head:  Predicts move probability distribution over 1858-move vocabulary.
 Value Head:   Predicts position evaluation [-1, 1] (from moving side's perspective).
 Error Head:   Predicts centipawn loss and blunder probability.
 """

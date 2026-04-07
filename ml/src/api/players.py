@@ -14,11 +14,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Canonical time control names accepted by this API
+VALID_TIME_CONTROLS = {"bullet", "blitz", "rapid", "classical"}
+
+# Maps our canonical names to Lichess perf type keys
+LICHESS_PERF_MAP = {
+    "bullet": "bullet",
+    "blitz": "blitz",
+    "rapid": "rapid",
+    "classical": "classical",
+}
+
 
 class BuildProfileRequest(BaseModel):
     source: str  # "lichess" or "chesscom"
     username: str
     max_games: int = 200
+    time_control: str | None = None  # "bullet", "blitz", "rapid", "classical"
 
 
 class PlayerProfile(BaseModel):
@@ -31,6 +43,8 @@ class PlayerProfile(BaseModel):
     player_key: str | None = None
     opening_book_size: int = 0
     preparation_steps: list[str] = []
+    ratings_by_time_control: dict[str, float | None] = {}
+    selected_time_control: str | None = None
 
 
 @router.post("/player/build-profile")
@@ -38,11 +52,21 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
     """Fetch a player's games and compute their style profile.
 
     This builds a player embedding from their game history.
+    Optionally filters by time control so the model plays like the person
+    at that specific time control (e.g. their bullet vs rapid style).
     """
     from src.data.player_stats import compute_stats_from_pgns
 
-    # Get authoritative rating from profile API FIRST
+    # Validate time_control if provided
+    if request.time_control and request.time_control not in VALID_TIME_CONTROLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid time_control: {request.time_control}. "
+                   f"Must be one of: {', '.join(sorted(VALID_TIME_CONTROLS))}",
+        )
+
     authoritative_rating: float | None = None
+    ratings_by_tc: dict[str, float | None] = {}
     pgn_texts: list[str] = []
 
     if request.source == "lichess":
@@ -51,37 +75,72 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
         try:
             profile = await fetch_player_profile(request.username)
             perfs = profile.get("perfs", {})
-            for game_type in ["blitz", "rapid", "classical", "bullet"]:
-                if game_type in perfs and "rating" in perfs[game_type]:
-                    authoritative_rating = float(perfs[game_type]["rating"])
-                    break
+
+            # Collect all available ratings
+            for tc in VALID_TIME_CONTROLS:
+                lichess_key = LICHESS_PERF_MAP[tc]
+                if lichess_key in perfs and "rating" in perfs[lichess_key]:
+                    ratings_by_tc[tc] = float(perfs[lichess_key]["rating"])
+
+            # Pick the authoritative rating: use requested TC if specified
+            if request.time_control and request.time_control in ratings_by_tc:
+                authoritative_rating = ratings_by_tc[request.time_control]
+            else:
+                # Fallback priority: blitz > rapid > classical > bullet
+                for tc in ["blitz", "rapid", "classical", "bullet"]:
+                    if tc in ratings_by_tc and ratings_by_tc[tc] is not None:
+                        authoritative_rating = ratings_by_tc[tc]
+                        break
         except Exception as e:
             logger.warning("Failed to fetch Lichess profile for %s: %s", request.username, e)
 
-        async for pgn in fetch_player_games(request.username, max_games=request.max_games):
+        # Filter games by time control if specified
+        perf_type = LICHESS_PERF_MAP.get(request.time_control) if request.time_control else None
+        async for pgn in fetch_player_games(
+            request.username,
+            max_games=request.max_games,
+            perf_type=perf_type,
+        ):
             pgn_texts.append(pgn)
 
     elif request.source == "chesscom":
-        from src.data.sources.chesscom import fetch_player_stats, fetch_player_games
+        from src.data.sources.chesscom import (
+            fetch_player_stats,
+            fetch_player_games,
+            fetch_all_ratings,
+        )
 
         try:
-            chess_stats = await fetch_player_stats(request.username)
-            for game_type in ["chess_blitz", "chess_rapid", "chess_bullet", "chess_daily"]:
-                if game_type in chess_stats:
-                    rating_data = chess_stats[game_type].get("last", {})
-                    if "rating" in rating_data:
-                        authoritative_rating = float(rating_data["rating"])
+            ratings_by_tc = await fetch_all_ratings(request.username)
+
+            # Pick the authoritative rating: use requested TC if specified
+            if request.time_control and request.time_control in ratings_by_tc:
+                authoritative_rating = ratings_by_tc[request.time_control]
+            else:
+                for tc in ["blitz", "rapid", "bullet", "daily"]:
+                    if tc in ratings_by_tc and ratings_by_tc[tc] is not None:
+                        authoritative_rating = ratings_by_tc[tc]
                         break
         except Exception as e:
             logger.warning("Failed to fetch Chess.com stats for %s: %s", request.username, e)
 
-        async for pgn in fetch_player_games(request.username, max_games=request.max_games):
+        # Filter games by time control if specified
+        time_class = request.time_control if request.time_control else None
+        async for pgn in fetch_player_games(
+            request.username,
+            max_games=request.max_games,
+            time_class=time_class,
+        ):
             pgn_texts.append(pgn)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown source: {request.source}")
 
     if not pgn_texts:
-        raise HTTPException(status_code=404, detail=f"No games found for {request.username}")
+        tc_msg = f" for time control '{request.time_control}'" if request.time_control else ""
+        raise HTTPException(
+            status_code=404,
+            detail=f"No games found for {request.username}{tc_msg}",
+        )
 
     # Compute stats from games
     stats = compute_stats_from_pgns(pgn_texts, request.username)
@@ -89,6 +148,9 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
     # Override PGN-derived rating with authoritative API rating
     if authoritative_rating is not None:
         stats.rating = authoritative_rating
+
+    # Load the rating-bracket model checkpoint for this player's rating
+    prediction_pipeline.load_model_for_rating(stats.rating)
 
     # Build style summary
     # Accuracy requires Stockfish analysis — mark as -1 when using default CPL
@@ -122,13 +184,14 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
         except Exception:
             continue
 
-    # Register the book and stats with the prediction pipeline
+    # Register the book, stats, and time control with the prediction pipeline
     player_key = f"{request.source}:{request.username}".lower()
     prediction_pipeline.set_opening_book(player_key, book)
     prediction_pipeline.set_player_stats(player_key, stats.to_vector())
+    prediction_pipeline.set_player_time_control(player_key, request.time_control)
     logger.info(
-        "Built opening book for %s: %d games, %d nodes",
-        player_key, book.total_games, book.size,
+        "Built opening book for %s: %d games, %d nodes, time_control=%s",
+        player_key, book.total_games, book.size, request.time_control,
     )
 
     return PlayerProfile(
@@ -145,6 +208,8 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
             "built_opening_book",
             "computed_stats",
         ],
+        ratings_by_time_control=ratings_by_tc,
+        selected_time_control=request.time_control,
     )
 
 

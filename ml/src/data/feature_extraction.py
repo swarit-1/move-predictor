@@ -21,6 +21,8 @@ def extract_position_features(
     engine_eval: float | None = None,
     centipawn_loss: float | None = None,
     is_blunder: bool = False,
+    player_stats: np.ndarray | None = None,
+    time_control: int = 0,
 ) -> dict:
     """Extract all features for a single position.
 
@@ -91,12 +93,22 @@ def extract_position_features(
     # Position complexity features
     complexity = compute_position_complexity(board)
 
+    # Build player_stats vector: use provided stats or construct a minimal one
+    from src.config import settings
+    if player_stats is not None:
+        stats_vector = player_stats
+    else:
+        stats_vector = np.zeros(settings.num_player_stats, dtype=np.float32)
+        stats_vector[0] = player_rating / 3000.0  # rating slot
+
     return {
         "board_tensor": board_tensor,  # (18, 8, 8)
         "move_history": np.array(history_indices, dtype=np.int64),  # (T,)
         "player_id": player_id,
+        "player_stats": stats_vector,  # (num_player_stats,)
         "player_rating": player_rating / 3000.0,  # normalize
         "game_phase": game_phase,
+        "time_control": time_control,  # 0=unknown, 1=bullet, 2=blitz, 3=rapid, 4=classical
         "move_number": min(board.fullmove_number / 100.0, 1.0),
         "complexity": np.array([
             complexity["mobility"],
@@ -112,10 +124,36 @@ def extract_position_features(
     }
 
 
+# Map PGN TimeControl header values to our time_control IDs
+# 0=unknown, 1=bullet, 2=blitz, 3=rapid, 4=classical
+def _parse_time_control_from_pgn(pgn_header: str) -> int:
+    """Parse PGN TimeControl header (e.g. '300+0') into our time control ID."""
+    if not pgn_header or pgn_header == "-" or pgn_header == "?":
+        return 0
+    try:
+        parts = pgn_header.split("+")
+        base_seconds = int(parts[0])
+        increment = int(parts[1]) if len(parts) > 1 else 0
+        # Estimated game duration: base + 40 * increment
+        estimated = base_seconds + 40 * increment
+        if estimated < 180:
+            return 1  # bullet
+        elif estimated < 600:
+            return 2  # blitz
+        elif estimated < 1800:
+            return 3  # rapid
+        else:
+            return 4  # classical
+    except (ValueError, IndexError):
+        return 0
+
+
 def parse_pgn_to_positions(
     pgn_text: str,
     player_id: int = 0,
     player_rating: int = 1500,
+    player_stats: np.ndarray | None = None,
+    time_control: int | None = None,
 ) -> list[dict]:
     """Parse a PGN string and extract position features for every move.
 
@@ -126,6 +164,8 @@ def parse_pgn_to_positions(
         pgn_text: PGN string of one game.
         player_id: Integer player ID.
         player_rating: Player rating.
+        player_stats: Precomputed player stats vector.
+        time_control: Override time control ID. If None, parsed from PGN header.
 
     Returns:
         List of feature dicts, one per position.
@@ -133,6 +173,11 @@ def parse_pgn_to_positions(
     game = chess.pgn.read_game(StringIO(pgn_text))
     if game is None:
         return []
+
+    # Determine time control from PGN header if not provided
+    if time_control is None:
+        tc_header = game.headers.get("TimeControl", "")
+        time_control = _parse_time_control_from_pgn(tc_header)
 
     positions = []
     board = game.board()
@@ -147,6 +192,8 @@ def parse_pgn_to_positions(
                 move_history=move_history.copy(),
                 player_id=player_id,
                 player_rating=player_rating,
+                player_stats=player_stats,
+                time_control=time_control,
             )
             positions.append(features)
         except ValueError:

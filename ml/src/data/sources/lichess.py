@@ -93,6 +93,24 @@ async def fetch_player_profile(username: str) -> dict:
         return response.json()
 
 
+async def fetch_all_ratings(username: str) -> dict[str, float | None]:
+    """Fetch all available ratings for a Lichess player.
+
+    Returns:
+        Dict mapping time control name to rating, e.g.:
+        {"bullet": 1200, "blitz": 1350, "rapid": 1500, "classical": 1400}
+    """
+    profile = await fetch_player_profile(username)
+    perfs = profile.get("perfs", {})
+    ratings: dict[str, float | None] = {}
+    for tc in ["bullet", "blitz", "rapid", "classical"]:
+        if tc in perfs and "rating" in perfs[tc]:
+            ratings[tc] = float(perfs[tc]["rating"])
+        else:
+            ratings[tc] = None
+    return ratings
+
+
 def _is_complete_pgn(pgn_text: str) -> bool:
     """Check if a PGN string contains a complete game."""
     try:

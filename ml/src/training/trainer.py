@@ -134,6 +134,7 @@ class Trainer:
                     player_id=batch["player_id"],
                     player_stats=batch["player_stats"],
                     game_phase=batch["game_phase"],
+                    time_control=batch.get("time_control"),
                 )
 
                 losses = self.criterion(
@@ -187,6 +188,7 @@ class Trainer:
                     player_id=batch["player_id"],
                     player_stats=batch["player_stats"],
                     game_phase=batch["game_phase"],
+                    time_control=batch.get("time_control"),
                 )
 
             tracker.update(

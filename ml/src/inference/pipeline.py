@@ -33,12 +33,21 @@ logger = logging.getLogger(__name__)
 class PredictionPipeline:
     """End-to-end inference pipeline."""
 
+    # Map canonical time control name → model ID
+    TIME_CONTROL_IDS = {
+        "bullet": 1,
+        "blitz": 2,
+        "rapid": 3,
+        "classical": 4,
+    }
+
     def __init__(self):
         self.model: MovePredictor | None = None
         self.device = torch.device("cpu")
         self.has_checkpoint = False
         self.opening_books: dict[str, OpeningBook] = {}  # player_key → book
         self.player_stats: dict[str, np.ndarray] = {}   # player_key → stats vector
+        self.player_time_controls: dict[str, int] = {}  # player_key → TC ID
 
     def load_model(self, checkpoint_path: str | None = None):
         """Load model from checkpoint or initialize fresh."""
@@ -102,6 +111,12 @@ class PredictionPipeline:
         self.player_stats[player_key] = stats
         logger.info("Stored player stats for %s (%d features)", player_key, len(stats))
 
+    def set_player_time_control(self, player_key: str, time_control: str | None) -> None:
+        """Store the time control used for this player's profile."""
+        tc_id = self.TIME_CONTROL_IDS.get(time_control, 0) if time_control else 0
+        self.player_time_controls[player_key] = tc_id
+        logger.info("Stored time control for %s: %s (id=%d)", player_key, time_control, tc_id)
+
     @torch.no_grad()
     async def predict(
         self,
@@ -143,7 +158,7 @@ class PredictionPipeline:
             return self._predict_with_model(
                 board, move_history, player_id, player_stats,
                 player_rating, style, engine_top_moves, opening_book_probs,
-                time_pressure,
+                time_pressure, player_key,
             )
         else:
             return await self._predict_with_data(
@@ -162,6 +177,7 @@ class PredictionPipeline:
         engine_top_moves: list[dict] | None,
         opening_book_probs: dict[str, float] | None = None,
         time_pressure: float = 0.0,
+        player_key: str | None = None,
     ) -> SampledMove:
         """Run the neural network model for prediction."""
         board_tensor = torch.from_numpy(board_to_tensor(board)).unsqueeze(0).to(self.device)
@@ -179,6 +195,12 @@ class PredictionPipeline:
         phase = classify_game_phase(board)
         phase_tensor = torch.tensor([phase], dtype=torch.long, device=self.device)
 
+        # Time control: retrieve stored TC for this player
+        tc_id = 0
+        if player_key and player_key in self.player_time_controls:
+            tc_id = self.player_time_controls[player_key]
+        tc_tensor = torch.tensor([tc_id], dtype=torch.long, device=self.device)
+
         legal_mask = torch.from_numpy(get_legal_move_mask(board)).unsqueeze(0).to(self.device)
 
         outputs = self.model(
@@ -188,6 +210,7 @@ class PredictionPipeline:
             player_stats=stats_tensor,
             game_phase=phase_tensor,
             legal_move_mask=legal_mask,
+            time_control=tc_tensor,
         )
 
         policy_logits = outputs["policy_logits"][0]

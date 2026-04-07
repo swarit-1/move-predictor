@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     max_players: int = 200_000
     num_player_stats: int = 25
     board_channels: int = 18
+    num_time_controls: int = 5  # 0=unknown, 1=bullet, 2=blitz, 3=rapid, 4=classical
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

@@ -55,6 +55,7 @@ class MovePredictor(nn.Module):
         player_stats: torch.Tensor,
         game_phase: torch.Tensor | None = None,
         legal_move_mask: torch.Tensor | None = None,
+        time_control: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Args:
@@ -64,6 +65,7 @@ class MovePredictor(nn.Module):
             player_stats: (B, num_stats) continuous player features.
             game_phase: (B,) game phase (0/1/2), optional.
             legal_move_mask: (B, vocab_size) boolean mask, optional.
+            time_control: (B,) time control ID (0=unknown, 1=bullet, ...), optional.
 
         Returns:
             Dict with keys:
@@ -75,7 +77,7 @@ class MovePredictor(nn.Module):
         """
         # Encode each modality
         board_features = self.board_encoder(board_tensor)
-        seq_features = self.sequence_encoder(move_history, game_phase)
+        seq_features = self.sequence_encoder(move_history, game_phase, time_control)
         player_features = self.player_embedding(player_id, player_stats)
 
         # Fuse

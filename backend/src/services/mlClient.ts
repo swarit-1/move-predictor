@@ -93,6 +93,7 @@ class MLClient {
     source: string;
     username: string;
     max_games?: number;
+    time_control?: string | null;
   }): Promise<PlayerProfile> {
     const response = await this.client.post(
       "/ml/player/build-profile",

@@ -82,6 +82,7 @@ class ChessPositionDataset(Dataset):
             "player_id": torch.tensor(item.get("player_id", 0), dtype=torch.long),
             "player_stats": torch.from_numpy(player_stats),
             "game_phase": torch.tensor(item.get("game_phase", 1), dtype=torch.long),
+            "time_control": torch.tensor(item.get("time_control", 0), dtype=torch.long),
             # Labels
             "move_index": torch.tensor(item["move_index"], dtype=torch.long),
             "eval_score": torch.tensor(item.get("eval_score", 0.0), dtype=torch.float32),
@@ -91,7 +92,7 @@ class ChessPositionDataset(Dataset):
 
     def _get_from_hdf5(self, idx: int) -> dict[str, torch.Tensor]:
         f = self._hdf5_file
-        return {
+        result = {
             "board_tensor": torch.from_numpy(f["board_tensor"][idx]),
             "move_history": torch.from_numpy(f["move_history"][idx]),
             "player_id": torch.tensor(f["player_id"][idx], dtype=torch.long),
@@ -102,6 +103,12 @@ class ChessPositionDataset(Dataset):
             "centipawn_loss": torch.tensor(f["centipawn_loss"][idx], dtype=torch.float32),
             "is_blunder": torch.tensor(f["is_blunder"][idx], dtype=torch.float32),
         }
+        # time_control may not exist in older HDF5 files
+        if "time_control" in f:
+            result["time_control"] = torch.tensor(f["time_control"][idx], dtype=torch.long)
+        else:
+            result["time_control"] = torch.tensor(0, dtype=torch.long)
+        return result
 
     def __del__(self):
         if self._hdf5_file is not None:
@@ -172,6 +179,7 @@ def save_to_hdf5(data: list[dict], filepath: str):
         f.create_dataset("player_id", shape=(n,), dtype="int64")
         f.create_dataset("player_stats", shape=(n, settings.num_player_stats), dtype="float32")
         f.create_dataset("game_phase", shape=(n,), dtype="int64")
+        f.create_dataset("time_control", shape=(n,), dtype="int64")
         f.create_dataset("move_index", shape=(n,), dtype="int64")
         f.create_dataset("eval_score", shape=(n,), dtype="float32")
         f.create_dataset("centipawn_loss", shape=(n,), dtype="float32")
@@ -190,6 +198,7 @@ def save_to_hdf5(data: list[dict], filepath: str):
             f["player_stats"][i] = stats
 
             f["game_phase"][i] = item.get("game_phase", 1)
+            f["time_control"][i] = item.get("time_control", 0)
             f["move_index"][i] = item["move_index"]
             f["eval_score"][i] = item.get("eval_score", 0.0)
             f["centipawn_loss"][i] = item.get("centipawn_loss", 0.0)

@@ -8,12 +8,21 @@ export function usePlayerProfile() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchProfile = useCallback(
-    async (source: "lichess" | "chesscom", username: string) => {
+    async (
+      source: "lichess" | "chesscom",
+      username: string,
+      timeControl?: string | null,
+    ) => {
       setOpponentLoading(true);
       setError(null);
 
       try {
-        const response = await buildPlayerProfile(source, username);
+        const response = await buildPlayerProfile(
+          source,
+          username,
+          200,
+          timeControl,
+        );
 
         if (response.success) {
           const data = response.data;
@@ -25,6 +34,8 @@ export function usePlayerProfile() {
             styleSummary: data.style_summary,
             playerKey: data.player_key,
             openingBookSize: data.opening_book_size,
+            ratingsByTimeControl: data.ratings_by_time_control,
+            selectedTimeControl: data.selected_time_control,
           };
           setOpponent(profile);
         } else {

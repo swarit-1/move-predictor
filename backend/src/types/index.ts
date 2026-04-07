@@ -57,4 +57,8 @@ export interface PlayerProfile {
     opening_diversity: number;
     preferred_openings: Record<string, number>;
   };
+  player_key?: string;
+  opening_book_size?: number;
+  ratings_by_time_control?: Record<string, number | null>;
+  selected_time_control?: string | null;
 }

@@ -10,6 +10,11 @@ const buildProfileSchema = z.object({
   source: z.enum(["lichess", "chesscom"]),
   username: z.string().min(1).max(100),
   max_games: z.number().int().min(10).max(5000).optional().default(200),
+  time_control: z
+    .enum(["bullet", "blitz", "rapid", "classical"])
+    .optional()
+    .nullable()
+    .default(null),
 });
 
 /**
@@ -24,6 +29,7 @@ playersRouter.post("/build-profile", async (req: Request, res: Response) => {
       source: params.source,
       username: params.username,
       max_games: params.max_games,
+      time_control: params.time_control,
     });
 
     res.json({ success: true, data: profile });

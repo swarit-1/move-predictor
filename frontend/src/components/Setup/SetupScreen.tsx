@@ -21,12 +21,15 @@ const TIME_CONTROLS = [
   { label: "15+10", initial: 900, increment: 10 },
 ];
 
+type RatingTimeControl = "bullet" | "blitz" | "rapid" | "classical" | null;
+
 export function SetupScreen({ onStart, onBack }: Props) {
   const [activeTab, setActiveTab] = useState<OpponentTab>("rating");
   const [source, setSource] = useState<"lichess" | "chesscom">("lichess");
   const [username, setUsername] = useState("");
   const [manualRating, setManualRating] = useState(1500);
   const [selectedTC, setSelectedTC] = useState(0); // index into TIME_CONTROLS
+  const [ratingTC, setRatingTC] = useState<RatingTimeControl>(null); // time control for rating filtering
   const playerColor = useGameStore((s) => s.playerColor);
   const setPlayerColor = useGameStore((s) => s.setPlayerColor);
   const showEvalBar = useGameStore((s) => s.showEvalBar);
@@ -39,7 +42,7 @@ export function SetupScreen({ onStart, onBack }: Props) {
 
   const handleSearch = () => {
     if (username.trim()) {
-      fetchProfile(source, username.trim());
+      fetchProfile(source, username.trim(), ratingTC);
     }
   };
 
@@ -194,6 +197,8 @@ export function SetupScreen({ onStart, onBack }: Props) {
                 loading={opponentLoading}
                 error={error}
                 opponent={opponent}
+                ratingTC={ratingTC}
+                setRatingTC={setRatingTC}
               />
             )}
 
@@ -259,6 +264,14 @@ export function SetupScreen({ onStart, onBack }: Props) {
 
 /* ── Profile Tab ─────────────────────────────────────────────── */
 
+const RATING_TC_OPTIONS: { key: RatingTimeControl; label: string; icon: string }[] = [
+  { key: null, label: "All", icon: "" },
+  { key: "bullet", label: "1 min", icon: "" },
+  { key: "blitz", label: "5 min", icon: "" },
+  { key: "rapid", label: "10 min", icon: "" },
+  { key: "classical", label: "30 min", icon: "" },
+];
+
 function ProfileTab({
   source,
   setSource,
@@ -268,6 +281,8 @@ function ProfileTab({
   loading,
   error,
   opponent,
+  ratingTC,
+  setRatingTC,
 }: {
   source: "lichess" | "chesscom";
   setSource: (s: "lichess" | "chesscom") => void;
@@ -277,6 +292,8 @@ function ProfileTab({
   loading: boolean;
   error: string | null;
   opponent: any;
+  ratingTC: RatingTimeControl;
+  setRatingTC: (tc: RatingTimeControl) => void;
 }) {
   return (
     <div className="space-y-4 animate-fade-in">
@@ -298,6 +315,33 @@ function ProfileTab({
             {s === "lichess" ? "Lichess" : "Chess.com"}
           </button>
         ))}
+      </div>
+
+      {/* Time Control Rating Filter */}
+      <div>
+        <p className="text-[10px] text-zinc-500 uppercase tracking-[0.15em] font-medium mb-2">
+          Rating Type
+        </p>
+        <div className="flex gap-1.5">
+          {RATING_TC_OPTIONS.map((opt) => (
+            <button
+              key={opt.key ?? "all"}
+              onClick={() => setRatingTC(opt.key)}
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 ${
+                ratingTC === opt.key
+                  ? "bg-gold-dim text-gold ring-1 ring-gold/25"
+                  : "bg-white/[0.03] text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-zinc-600 mt-1 font-light">
+          {ratingTC
+            ? `Train on ${ratingTC} games only \u2014 mimics their ${ratingTC} playing style`
+            : "Uses all time controls for a general playing style"}
+        </p>
       </div>
 
       <div className="flex gap-2">
@@ -347,12 +391,42 @@ function ProfileTab({
               </p>
               <p className="text-[11px] text-zinc-500 mt-0.5 font-light">
                 {opponent.numGames} games
+                {opponent.selectedTimeControl && (
+                  <span className="ml-1 text-gold/80">
+                    ({opponent.selectedTimeControl})
+                  </span>
+                )}
               </p>
             </div>
             <span className="text-sm font-mono font-bold text-zinc-200 bg-white/[0.06] px-3 py-1.5 rounded-xl">
               {opponent.rating.toFixed(0)}
             </span>
           </div>
+
+          {/* Per-time-control ratings */}
+          {opponent.ratingsByTimeControl && Object.keys(opponent.ratingsByTimeControl).length > 0 && (
+            <div className="flex gap-1.5">
+              {Object.entries(opponent.ratingsByTimeControl as Record<string, number | null>)
+                .filter(([, r]) => r != null)
+                .map(([tc, rating]) => (
+                  <div
+                    key={tc}
+                    className={`flex-1 text-center py-1.5 rounded-lg border ${
+                      opponent.selectedTimeControl === tc
+                        ? "bg-gold-dim border-gold/25"
+                        : "bg-white/[0.02] border-white/[0.04]"
+                    }`}
+                  >
+                    <p className={`text-xs font-mono font-bold ${
+                      opponent.selectedTimeControl === tc ? "text-gold" : "text-zinc-300"
+                    }`}>
+                      {(rating as number).toFixed(0)}
+                    </p>
+                    <p className="text-[9px] text-zinc-600 mt-0.5 font-medium capitalize">{tc}</p>
+                  </div>
+                ))}
+            </div>
+          )}
 
           {opponent.styleSummary && (
             <div className="grid grid-cols-5 gap-1.5">

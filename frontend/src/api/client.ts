@@ -62,12 +62,14 @@ export async function reviewGame(moves: string[], depth = 18) {
 export async function buildPlayerProfile(
   source: "lichess" | "chesscom",
   username: string,
-  maxGames = 200
+  maxGames = 200,
+  timeControl?: string | null,
 ) {
   const { data } = await api.post("/players/build-profile", {
     source,
     username,
     max_games: maxGames,
+    time_control: timeControl || null,
   });
   return data;
 }

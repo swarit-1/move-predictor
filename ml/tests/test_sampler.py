@@ -26,15 +26,15 @@ class TestTemperature:
         assert temp < 0.5
 
     def test_temperature_clamps(self):
-        """Temperature stays within 0.25-1.0 range."""
-        # Very low
+        """Temperature stays within floor-ceiling range per rating bracket."""
+        # Very low: 2200+ players have floor=0.15
         temp_low = compute_temperature(0.0, 0.0, player_rating=3000)
-        assert temp_low >= 0.25
+        assert temp_low >= 0.15
 
-        # Very high — ceiling is 1.0 with nucleus sampling
+        # Very high — ceiling is 1.5 for sub-1200, 1.2 for sub-1800, 0.8 for 1800+
         style = StyleOverrides(risk_taking=100, blunder_frequency=100)
         temp_high = compute_temperature(5.0, 1.0, player_rating=400, style=style)
-        assert temp_high <= 1.0
+        assert temp_high <= 1.5
 
     def test_risk_taking_increases_temperature(self):
         base = compute_temperature(1.0, 0.2, player_rating=1500)
@@ -220,16 +220,20 @@ class TestNucleusSampling:
         )
 
     def test_temperature_ceiling(self):
-        """Verify temperature never exceeds 1.0."""
+        """Verify temperature respects per-rating-bracket ceiling and floor."""
         for rating in [200, 400, 600, 800, 1000, 1500, 2000]:
             for blunder in [0, 50, 100]:
                 style = StyleOverrides(blunder_frequency=blunder, risk_taking=100)
                 temp = compute_temperature(3.0, 0.5, rating, style)
-                assert temp <= 1.0, (
-                    f"Rating {rating}, blunder {blunder}: temp={temp} exceeds 1.0"
+                # Ceiling depends on rating bracket
+                ceiling = 1.5 if rating < 1200 else 1.2 if rating < 1800 else 0.8
+                assert temp <= ceiling, (
+                    f"Rating {rating}, blunder {blunder}: temp={temp} exceeds ceiling {ceiling}"
                 )
-                assert temp >= 0.25, (
-                    f"Rating {rating}: temp={temp} below floor"
+                # Floor depends on rating bracket
+                floor = 0.15 if rating >= 2200 else 0.25
+                assert temp >= floor, (
+                    f"Rating {rating}: temp={temp} below floor {floor}"
                 )
 
     def test_top_p_rating_scaling(self):
@@ -239,8 +243,8 @@ class TestNucleusSampling:
         high_p = _compute_top_p(2500)
 
         assert low_p > mid_p > high_p
-        assert low_p <= 0.98
-        assert high_p >= 0.80
+        assert low_p <= 0.96
+        assert high_p >= 0.70
 
     def test_nucleus_filter_removes_tail(self):
         """Nucleus filter zeros out low-probability tail moves."""

@@ -28,6 +28,7 @@ class SequenceEncoder(nn.Module):
         dim_feedforward: int = 512,
         dropout: float = 0.1,
         num_phases: int = 3,
+        num_time_controls: int = settings.num_time_controls,
     ):
         super().__init__()
 
@@ -42,6 +43,10 @@ class SequenceEncoder(nn.Module):
 
         # Game phase embedding (opening=0, middlegame=1, endgame=2)
         self.phase_embedding = nn.Embedding(num_phases, d_model)
+
+        # Time control embedding (0=unknown, 1=bullet, 2=blitz, 3=rapid, 4=classical)
+        # Human play style differs drastically between bullet and classical
+        self.time_control_embedding = nn.Embedding(num_time_controls, d_model)
 
         # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
@@ -64,11 +69,13 @@ class SequenceEncoder(nn.Module):
         self,
         move_indices: torch.Tensor,
         game_phase: torch.Tensor | None = None,
+        time_control: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
             move_indices: (B, T) integer tensor of move indices.
             game_phase: (B,) integer tensor of game phase (0/1/2), optional.
+            time_control: (B,) integer tensor of time control (0-4), optional.
 
         Returns:
             Feature vector of shape (B, d_model).
@@ -89,6 +96,11 @@ class SequenceEncoder(nn.Module):
         if game_phase is not None:
             phase_emb = self.phase_embedding(game_phase)  # (B, d_model)
             x = x + phase_emb.unsqueeze(1)  # broadcast over sequence
+
+        # Add time control embedding if provided
+        if time_control is not None:
+            tc_emb = self.time_control_embedding(time_control)  # (B, d_model)
+            x = x + tc_emb.unsqueeze(1)  # broadcast over sequence
 
         # Scale by sqrt(d_model) for stability
         x = x * math.sqrt(self.d_model)
