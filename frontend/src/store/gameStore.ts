@@ -81,9 +81,15 @@ interface GameState {
   // Game over by flag (time) — separate from chess.js game-over detection
   flagGameOver: GameOverInfo | null;
 
+  // Premove queued by the player while the opponent is thinking.
+  // Auto-executes after applyPredictedMove if still legal.
+  premove: { from: string; to: string; promotion?: string } | null;
+
   setFen: (fen: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
   applyPredictedMove: (moveUci: string) => boolean;
+  setPremove: (from: string, to: string, promotion?: string) => void;
+  clearPremove: () => void;
   undoMove: () => void;
   resetGame: () => void;
   setPrediction: (pred: PredictionData | null) => void;
@@ -131,10 +137,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   playerTimeLeft: 0,
   opponentTimeLeft: 0,
   flagGameOver: null,
+  premove: null,
 
   setFen: (fen) => {
     const chess = new Chess(fen);
-    set({ chess, fen, prediction: null, viewIndex: -1 });
+    set({ chess, fen, prediction: null, viewIndex: -1, premove: null });
   },
 
   makeMove: (from, to, promotion) => {
@@ -160,6 +167,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           pgn: chess.pgn(),
           prediction: null,
           viewIndex: -1,
+          premove: null,
         });
         return true;
       }
@@ -184,6 +192,15 @@ export const useGameStore = create<GameState>((set, get) => ({
           pgn: chess.pgn(),
           viewIndex: -1,
         });
+
+        // After the opponent's move lands, try to execute any queued premove.
+        // makeMove validates legality against the new position; if illegal,
+        // it returns false and we silently drop the premove.
+        const queued = get().premove;
+        if (queued) {
+          set({ premove: null });
+          get().makeMove(queued.from, queued.to, queued.promotion);
+        }
         return true;
       }
     } catch {
@@ -191,6 +208,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     return false;
   },
+
+  setPremove: (from, to, promotion) => set({ premove: { from, to, promotion } }),
+  clearPremove: () => set({ premove: null }),
 
   undoMove: () => {
     const chess = get().chess;
@@ -202,6 +222,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       pgn: chess.pgn(),
       prediction: null,
       viewIndex: -1,
+      premove: null,
     });
   },
 
@@ -220,6 +241,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       simulationSessionId: null,
       viewIndex: -1,
       flagGameOver: null,
+      premove: null,
     });
   },
 
@@ -245,6 +267,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       moveHistory: chess.history(),
       prediction: null,
       viewIndex: -1,
+      premove: null,
     });
   },
 
