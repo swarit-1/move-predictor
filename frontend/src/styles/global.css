@@ -2,99 +2,179 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────
+   Editorial walnut theme — warm monochrome, hairline rules,
+   typographic contrast. Replaces the prior dark/glow defaults.
+   ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  --paper: #f6f2ea;
+  --bone: #ede7d9;
+  --walnut-900: #15110c;
+  --walnut-800: #1e1813;
+  --walnut-700: #2a2219;
+  --walnut-600: #3a2e22;
+  --walnut-500: #5a4631;
+  --walnut-400: #7a6347;
+  --walnut-300: #a88e6e;
+  --gold: #c9a84c;
+  --gold-light: #dcc06a;
+  --edge: rgba(246, 242, 234, 0.10);
+  --edge-strong: rgba(246, 242, 234, 0.18);
+}
+
 @layer base {
-  body {
-    font-family: "DM Sans", system-ui, sans-serif;
+  html, body {
     margin: 0;
     min-height: 100vh;
+    background: var(--walnut-900);
+    color: var(--paper);
+    font-family: "DM Sans", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: #0b0b11;
-    background-image:
-      radial-gradient(circle at 1px 1px, rgba(255,255,255,0.015) 1px, transparent 0);
-    background-size: 40px 40px;
-    color: #e4e4e7;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 800px at 12% -10%, rgba(201, 168, 76, 0.06), transparent 60%),
+      radial-gradient(900px 700px at 110% 10%, rgba(168, 142, 110, 0.05), transparent 55%),
+      var(--walnut-900);
   }
 
   ::selection {
-    background: rgba(201, 168, 76, 0.25);
-    color: #fff;
+    background: rgba(201, 168, 76, 0.30);
+    color: var(--paper);
+  }
+
+  h1, h2, h3, h4 {
+    font-family: "DM Serif Display", Georgia, serif;
+    font-weight: 400;
   }
 }
 
 @layer components {
+  /* Editorial display numerals — used for "01 / 02 / 03" markers */
+  .editorial-num {
+    font-family: "DM Serif Display", Georgia, serif;
+    font-feature-settings: "tnum", "lnum";
+    letter-spacing: -0.02em;
+  }
+
+  /* Eyebrow / category labels */
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--walnut-300);
+    font-weight: 500;
+  }
+
+  /* Hairline divider */
+  .hairline {
+    border-color: var(--edge);
+  }
+  .hairline-strong {
+    border-color: var(--edge-strong);
+  }
+
+  /* Text gradient retained for the brand wordmark */
   .text-gradient {
-    background: linear-gradient(135deg, #C9A84C, #DCC06A);
+    background: linear-gradient(135deg, var(--gold-light), var(--gold));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
+  /* Legacy alias — kept so unaffected screens still render until migrated */
   .glass-card {
-    background: rgba(18, 18, 26, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--walnut-800);
+    border: 1px solid var(--edge);
     border-radius: 12px;
   }
-
   .glass-card-hover {
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, background 0.2s ease;
   }
   .glass-card-hover:hover {
-    background: rgba(26, 26, 36, 0.9);
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--edge-strong);
+    background: var(--walnut-700);
+  }
+
+  /* Editorial card variants used by common/Card.tsx */
+  .ed-card {
+    background: var(--walnut-800);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+  }
+  .ed-card-flat {
+    background: transparent;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+  }
+  .ed-card-paper {
+    background: linear-gradient(180deg, rgba(246, 242, 234, 0.04), transparent);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+  }
+
+  /* Page shell wrapper — common max-width and gutter for all screens */
+  .ed-shell {
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding-left: 32px;
+    padding-right: 32px;
   }
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
+  background: rgba(246, 242, 234, 0.10);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(246, 242, 234, 0.18);
 }
 
-/* Range slider */
+/* Range slider — thin gold fill on walnut track, no neon glow */
 input[type="range"] {
   -webkit-appearance: none;
   background: transparent;
   cursor: pointer;
 }
-
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
+  height: 2px;
+  background: var(--edge-strong);
+  border-radius: 1px;
 }
-
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: #C9A84C;
+  background: var(--gold);
   margin-top: -5px;
   cursor: pointer;
-  box-shadow: 0 0 8px rgba(201, 168, 76, 0.3), 0 2px 4px rgba(0, 0, 0, 0.3);
-  transition: box-shadow 0.2s ease;
+  border: 1px solid var(--walnut-900);
+  transition: transform 0.15s ease;
 }
-
 input[type="range"]::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 14px rgba(201, 168, 76, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+  transform: scale(1.15);
 }
-
 input[type="range"]:focus {
   outline: none;
 }
 
 input:focus-visible,
-button:focus-visible {
-  outline: 2px solid rgba(201, 168, 76, 0.4);
-  outline-offset: 2px;
+button:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 3px;
 }

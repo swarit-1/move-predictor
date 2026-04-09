@@ -1,0 +1,43 @@
+// Prisma schema for app-level tables (users, saved games).
+// The ML service has its own SQLAlchemy models in the same Postgres DB —
+// these are kept disjoint by name and migration history.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  username     String      @unique
+  passwordHash String
+  createdAt    DateTime    @default(now())
+  games        SavedGame[]
+
+  @@map("app_users")
+}
+
+model SavedGame {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pgn            String
+  finalFen       String
+  playerColor    String // "w" | "b"
+  opponentName   String?
+  opponentRating Int?
+  opponentSource String? // "lichess" | "chesscom"
+  result         String? // "1-0" | "0-1" | "1/2-1/2" | "*"
+  numMoves       Int
+  timeControl    String? // e.g. "300+0"
+  endReason      String? // checkmate / resign / flag / stalemate
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("app_saved_games")
+}

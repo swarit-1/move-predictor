@@ -107,26 +107,26 @@ export function ReplayScreen({ onBack }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-surface-0 text-zinc-100 flex flex-col">
-      {/* Header */}
-      <header className="border-b border-white/[0.04] bg-surface-0/90 flex-shrink-0 sticky top-0 z-20">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+    <div className="min-h-[calc(100vh-64px)] text-paper flex flex-col">
+      {/* Sub-header */}
+      <header className="border-b border-edge bg-walnut-900/85 backdrop-blur-md flex-shrink-0 sticky top-16 z-20">
+        <div className="ed-shell h-14 flex items-center justify-between">
           <button
             onClick={() => { store.reset(); onBack(); }}
-            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200 transition-colors duration-200 group"
+            className="flex items-center gap-2 text-[12px] tracking-eyebrow uppercase text-walnut-300 hover:text-paper transition-colors group"
           >
-            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
             </svg>
-            <span className="hidden sm:inline font-medium">Back</span>
+            <span className="hidden sm:inline">Back</span>
           </button>
 
           <div className="text-center">
-            <p className="text-sm font-semibold text-zinc-200">{game.title}</p>
-            <p className="text-[10px] text-zinc-500">{game.white} vs {game.black}, {game.year}</p>
+            <p className="font-serif text-[18px] text-paper leading-none">{game.title}</p>
+            <p className="text-[10px] tracking-eyebrow uppercase text-walnut-300 mt-1">{game.white} vs {game.black} · {game.year}</p>
           </div>
 
-          <div className="w-20" /> {/* Spacer for centering */}
+          <div className="w-20" />
         </div>
       </header>
 
@@ -146,7 +146,7 @@ export function ReplayScreen({ onBack }: Props) {
               )}
             </div>
 
-            <div className="rounded-lg shadow-2xl shadow-black/40 ring-1 ring-white/[0.04]">
+            <div className="rounded-lg shadow-lift ring-1 ring-edge">
               <Chessboard
                 position={fen}
                 onPieceDrop={handlePieceDrop}
@@ -224,18 +224,18 @@ export function ReplayScreen({ onBack }: Props) {
           {/* Sidebar — move list + game info */}
           <div className="w-full lg:w-[340px] space-y-3 flex-shrink-0 animate-slide-in-right">
             {/* Game info */}
-            <div className="glass-card p-4">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-[0.15em] font-medium mb-2">About this game</p>
-              <p className="text-xs text-zinc-400 font-light leading-relaxed">{game.description}</p>
-              <div className="flex items-center gap-3 mt-3 text-[10px] text-zinc-500">
+            <div className="ed-card p-5">
+              <p className="eyebrow mb-3">About this game</p>
+              <p className="text-[13px] text-walnut-300 leading-relaxed">{game.description}</p>
+              <div className="flex items-center gap-3 mt-4 pt-3 border-t border-edge text-[10px] tracking-eyebrow uppercase text-walnut-400">
                 <span>{game.event}, {game.year}</span>
-                <span>Result: {game.result}</span>
+                <span>Result · {game.result}</span>
               </div>
             </div>
 
             {/* Move list */}
-            <div className="glass-card p-4">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-[0.15em] font-medium mb-3">Moves</p>
+            <div className="ed-card p-5">
+              <p className="eyebrow mb-3">Moves</p>
               <div className="max-h-[400px] overflow-y-auto space-y-0.5 text-xs font-mono">
                 {Array.from({ length: Math.ceil(displayMoves.length / 2) }, (_, i) => {
                   const whiteIdx = i * 2;
@@ -275,54 +275,49 @@ export function ReplayScreen({ onBack }: Props) {
 /** Game selector grid */
 function GameSelector({ onSelect, onBack }: { onSelect: (g: FamousGame) => void; onBack: () => void }) {
   return (
-    <div className="min-h-screen bg-surface-0 flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl animate-fade-in">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200 transition-colors duration-200 group mb-6"
-        >
-          <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-          </svg>
-          <span className="font-medium">Back</span>
-        </button>
+    <div className="min-h-[calc(100vh-64px)] ed-shell pt-block pb-section animate-fade-in">
+      <button
+        onClick={onBack}
+        className="flex items-center gap-2 text-[12px] tracking-eyebrow uppercase text-walnut-300 hover:text-paper transition-colors mb-block group"
+      >
+        <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+        </svg>
+        <span>Back</span>
+      </button>
 
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight text-gradient mb-2">Replay a Famous Game</h1>
-          <p className="text-sm text-zinc-500 font-light">
-            Step through iconic games move by move. Fork at any point to explore alternatives.
-          </p>
-        </div>
+      <div className="border-b border-edge pb-block mb-block">
+        <div className="eyebrow mb-3">Replay</div>
+        <h1 className="font-serif text-hero text-paper">A library of famous games.</h1>
+        <p className="text-walnut-300 text-[15px] mt-4 max-w-xl">
+          Step through iconic games move by move. Fork at any point and let the
+          model take over either side.
+        </p>
+      </div>
 
-        <div className="grid gap-3">
-          {famousGames.map((game) => (
-            <button
-              key={game.id}
-              onClick={() => onSelect(game)}
-              className="w-full glass-card glass-card-hover p-4 text-left group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-zinc-200 group-hover:text-white transition-colors">
-                    {game.title}
-                  </h3>
-                  <p className="text-xs text-zinc-500 mt-0.5">
-                    {game.white} vs {game.black} — {game.event}, {game.year}
-                  </p>
-                  <p className="text-xs text-zinc-600 mt-1 font-light leading-relaxed line-clamp-2">
-                    {game.description}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0 mt-1">
-                  <span className="text-[10px] text-zinc-500 bg-white/[0.04] px-2 py-0.5 rounded">{game.result}</span>
-                  <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {famousGames.map((game) => (
+          <button
+            key={game.id}
+            onClick={() => onSelect(game)}
+            className="text-left ed-card hover:border-edgeStrong hover:bg-walnut-700/40 transition-colors p-6 group"
+          >
+            <div className="flex items-baseline justify-between gap-3 mb-3">
+              <h3 className="font-serif text-[20px] text-paper leading-tight group-hover:text-gold transition-colors">
+                {game.title}
+              </h3>
+              <span className="text-[10px] tracking-eyebrow uppercase text-walnut-300 font-mono shrink-0">
+                {game.result}
+              </span>
+            </div>
+            <p className="text-[12px] tracking-eyebrow uppercase text-walnut-400 mb-3">
+              {game.white} vs {game.black} · {game.event}, {game.year}
+            </p>
+            <p className="text-[13px] text-walnut-300 leading-relaxed line-clamp-3">
+              {game.description}
+            </p>
+          </button>
+        ))}
       </div>
     </div>
   );

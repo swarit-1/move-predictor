@@ -7,6 +7,8 @@ import { gamesRouter } from "./routes/games";
 import { playersRouter } from "./routes/players";
 import { predictRouter } from "./routes/predict";
 import { simulateRouter } from "./routes/simulate";
+import { authRouter } from "./routes/auth";
+import { savedGamesRouter } from "./routes/savedGames";
 import { errorHandler } from "./middleware/errorHandler";
 import { config, logger } from "./config";
 
@@ -30,6 +32,8 @@ app.use(
 );
 
 // Routes
+app.use("/api/auth", authRouter);
+app.use("/api/saved-games", savedGamesRouter);
 app.use("/api/games", gamesRouter);
 app.use("/api/players", playersRouter);
 app.use("/api/predict", predictRouter);

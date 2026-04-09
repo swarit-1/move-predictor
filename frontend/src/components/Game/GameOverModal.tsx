@@ -1,12 +1,16 @@
 import { useState, useEffect } from "react";
 import { useGameStore } from "../../store/gameStore";
+import { useAuthStore } from "../../store/authStore";
 
 interface Props {
   onNewGame: () => void;
   onReview: () => void;
+  onSave?: () => void | Promise<void>;
 }
 
-export function GameOverModal({ onNewGame, onReview }: Props) {
+export function GameOverModal({ onNewGame, onReview, onSave }: Props) {
+  const user = useAuthStore((s) => s.user);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const chess = useGameStore((s) => s.chess);
   const playerColor = useGameStore((s) => s.playerColor);
   const moveHistory = useGameStore((s) => s.moveHistory);
@@ -105,6 +109,33 @@ export function GameOverModal({ onNewGame, onReview }: Props) {
             <p className="text-xl font-mono font-bold text-zinc-200 mt-0.5">{moveHistory.length}</p>
           </div>
         </div>
+
+        {onSave && (
+          <button
+            onClick={async () => {
+              if (saveState === "saving" || saveState === "saved") return;
+              setSaveState("saving");
+              try {
+                await onSave();
+                setSaveState("saved");
+              } catch {
+                setSaveState("error");
+              }
+            }}
+            disabled={saveState === "saving" || saveState === "saved"}
+            className="w-full py-2.5 rounded-xl text-[12px] tracking-eyebrow uppercase border border-edge hover:border-edgeStrong text-paper bg-walnut-700/40 hover:bg-walnut-700 transition-colors disabled:opacity-60"
+          >
+            {saveState === "saved"
+              ? "Saved to library ✓"
+              : saveState === "saving"
+                ? "Saving…"
+                : saveState === "error"
+                  ? "Save failed — retry"
+                  : user
+                    ? "Save to library"
+                    : "Sign in to save"}
+          </button>
+        )}
 
         <div className="flex gap-2.5 pt-1">
           <button

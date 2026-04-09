@@ -8,6 +8,63 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// JWT injection — set by authStore.loadFromStorage / login / logout.
+let authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+api.interceptors.request.use((cfg) => {
+  if (authToken) {
+    cfg.headers = cfg.headers ?? {};
+    (cfg.headers as Record<string, string>).Authorization = `Bearer ${authToken}`;
+  }
+  return cfg;
+});
+
+// ── Auth ─────────────────────────────────────────────────────────
+export async function registerUser(email: string, username: string, password: string) {
+  const { data } = await api.post("/auth/register", { email, username, password });
+  return data;
+}
+export async function loginUser(identifier: string, password: string) {
+  const { data } = await api.post("/auth/login", { identifier, password });
+  return data;
+}
+export async function fetchMe() {
+  const { data } = await api.get("/auth/me");
+  return data;
+}
+
+// ── Saved games ──────────────────────────────────────────────────
+export interface SavedGamePayload {
+  pgn: string;
+  finalFen: string;
+  playerColor: "w" | "b";
+  opponentName?: string | null;
+  opponentRating?: number | null;
+  opponentSource?: "lichess" | "chesscom" | null;
+  result?: string | null;
+  numMoves: number;
+  timeControl?: string | null;
+  endReason?: string | null;
+}
+export async function saveGame(payload: SavedGamePayload) {
+  const { data } = await api.post("/saved-games", payload);
+  return data;
+}
+export async function listSavedGames(cursor?: string, limit = 50) {
+  const { data } = await api.get("/saved-games", { params: { cursor, limit } });
+  return data;
+}
+export async function getSavedGame(id: string) {
+  const { data } = await api.get(`/saved-games/${id}`);
+  return data;
+}
+export async function deleteSavedGame(id: string) {
+  const { data } = await api.delete(`/saved-games/${id}`);
+  return data;
+}
+
 // ── Game Import ──────────────────────────────────────────────────
 export async function importGames(
   source: "lichess" | "chesscom",
