@@ -30,11 +30,41 @@ from src.inference.blind_spots import (
 
 @dataclass
 class StyleOverrides:
-    """User-adjustable style parameters (0-100 scale)."""
+    """User-adjustable style parameters.
 
-    aggression: float = 50.0  # Higher = prefer attacking moves
-    risk_taking: float = 50.0  # Higher = more variance in move selection
-    blunder_frequency: float = 50.0  # Higher = more likely to make mistakes
+    PRD §5.2 / §4.1: expanded from 3 dimensions to 10. Every field is on a
+    0–100 scale where 50 is "play exactly like the measured player" and
+    deviations from 50 push the simulation more or less in the named
+    direction. New fields default to 50 so older callers (and the predict
+    API contract that only sent three fields) remain compatible.
+    """
+
+    # ── Original (unchanged semantics) ─────────────────────────────
+    aggression: float = 50.0  # Higher = prefer captures and checks
+    risk_taking: float = 50.0  # Higher = wider sampling distribution
+    blunder_frequency: float = 50.0  # Higher = inflated CPL/blunder estimate
+
+    # ── PRD §4.1 expansion ─────────────────────────────────────────
+    king_attack: float = 50.0
+    """Boost moves that increase pressure on the enemy king zone."""
+
+    positional: float = 50.0
+    """50 = neutral, <50 = more tactical/forcing, >50 = more positional/quiet."""
+
+    trade_preference: float = 50.0
+    """Higher = more willing to initiate captures (not just recaptures)."""
+
+    opening_loyalty: float = 50.0
+    """Higher = stronger pull toward the player's opening-book moves."""
+
+    repertoire_width: float = 50.0
+    """Higher = sample more broadly within the book; lower = stick to top line."""
+
+    endgame_strength: float = 50.0
+    """Lower = sloppier in the endgame, higher = more accurate."""
+
+    defensive_tenacity: float = 50.0
+    """Higher = plays sharper / less likely to drift when in worse positions."""
 
 
 @dataclass
@@ -57,6 +87,8 @@ def compute_temperature(
     player_rating: float = 1500.0,
     style: StyleOverrides | None = None,
     time_pressure: float = 0.0,
+    game_phase: int | None = None,
+    position_eval_cp: float | None = None,
 ) -> float:
     """Compute sampling temperature based on predicted error and player skill.
 
@@ -108,6 +140,26 @@ def compute_temperature(
     if time_pressure > 0:
         temperature *= (1.0 + 0.5 * time_pressure)
 
+    # PRD §5.2: endgame_strength modulates temperature only in the endgame
+    # (game_phase == 2). Lower endgame_strength → looser play → higher
+    # temperature. Centered at 50.
+    if style is not None and game_phase == 2:
+        endgame_factor = (100.0 - style.endgame_strength) / 50.0  # 2.0..0.0
+        temperature *= (0.75 + 0.5 * endgame_factor)
+
+    # PRD §5.2: defensive_tenacity sharpens play when the position is
+    # already worse than -100 cp from the player's perspective. The eval
+    # at this point should be normalized to the player's POV by the
+    # caller; we accept it in centipawns. Higher tenacity → lower temp
+    # → more focused sampling → fewer drifty positional losses.
+    if (
+        style is not None
+        and position_eval_cp is not None
+        and position_eval_cp <= -100
+    ):
+        tenacity = (style.defensive_tenacity - 50.0) / 100.0  # -0.5..+0.5
+        temperature *= max(0.5, 1.0 - tenacity * 0.6)
+
     # Rating-dependent ceiling and floor
     ceiling = 1.5 if player_rating < 1200 else 1.2 if player_rating < 1800 else 0.8
     floor = 0.15 if player_rating >= 2200 else 0.25
@@ -121,8 +173,9 @@ def apply_style_bias(
 ) -> torch.Tensor:
     """Apply style-based biases to move logits.
 
-    Modifies the logit distribution to favor certain types of moves
-    based on the style overrides.
+    PRD §5.2: dispatches to per-dimension bias functions for each of the
+    expanded style fields. Each bias is centered at 50 (neutral, no
+    change) and operates as an additive logit delta per affected move.
 
     Args:
         logits: (vocab_size,) raw policy logits.
@@ -132,30 +185,121 @@ def apply_style_bias(
     Returns:
         Modified logits.
     """
-    if style is None or style.aggression == 50.0:
+    if style is None:
         return logits
+
+    # Short-circuit: if every field is exactly neutral, no work to do.
+    if (
+        style.aggression == 50.0
+        and style.king_attack == 50.0
+        and style.positional == 50.0
+        and style.trade_preference == 50.0
+    ):
+        return logits
+
+    from src.models.move_encoding import encode_move
 
     modified = logits.clone()
 
-    # Aggression bias: boost captures and checks
-    aggression_boost = (style.aggression - 50.0) / 100.0  # -0.5 to +0.5
+    aggression_boost = (style.aggression - 50.0) / 100.0       # -0.5 to +0.5
+    king_attack_boost = (style.king_attack - 50.0) / 100.0     # -0.5 to +0.5
+    # positional > 50 favours quiet; < 50 favours tactical.
+    positional_boost = (style.positional - 50.0) / 100.0       # -0.5 to +0.5
+    trade_boost = (style.trade_preference - 50.0) / 100.0      # -0.5 to +0.5
+
+    # Pre-compute the enemy king zone once for king-attack scoring.
+    king_zone = _enemy_king_zone(board)
+    own_color = board.turn
+
+    # Track whether the previous move was a capture, so we can score
+    # `trade_preference` correctly (initiating capture vs recapture).
+    last_capture_sq = (
+        board.peek().to_square
+        if board.move_stack and board.is_capture(board.peek())
+        else None
+    )
 
     for move in board.legal_moves:
-        from src.models.move_encoding import encode_move
         try:
             idx = encode_move(move, board)
         except ValueError:
             continue
 
         bonus = 0.0
-        if board.is_capture(move):
+        is_capture = board.is_capture(move)
+        is_check = board.gives_check(move)
+
+        # — Aggression: classic capture/check boost
+        if is_capture:
             bonus += aggression_boost * 1.5
-        if board.gives_check(move):
+        if is_check:
             bonus += aggression_boost * 1.0
 
-        modified[idx] += bonus
+        # — Positional vs tactical: positive value rewards quiet moves,
+        #   negative value rewards forcing moves.
+        is_quiet = not is_capture and not is_check
+        if is_quiet:
+            bonus += positional_boost * 0.8
+        else:
+            bonus -= positional_boost * 0.6
+
+        # — Trade preference: only initiating captures (not recaptures).
+        if is_capture and move.to_square != last_capture_sq:
+            bonus += trade_boost * 1.2
+
+        # — King-attack: moves that point at the enemy king zone, or
+        #   moves by pieces that already attack it.
+        if king_zone is not None:
+            if move.to_square in king_zone:
+                bonus += king_attack_boost * 1.0
+            else:
+                # Reward bringing additional attackers toward the zone.
+                if _move_increases_king_pressure(board, move, king_zone, own_color):
+                    bonus += king_attack_boost * 0.6
+
+        if bonus != 0.0:
+            modified[idx] += bonus
 
     return modified
+
+
+def _enemy_king_zone(board: chess.Board) -> set[int] | None:
+    """Return the 9 squares around the enemy king (king + 8 neighbours)."""
+    opp = not board.turn
+    king_sq = board.king(opp)
+    if king_sq is None:
+        return None
+    zone = {king_sq}
+    kr = chess.square_rank(king_sq)
+    kf = chess.square_file(king_sq)
+    for dr in (-1, 0, 1):
+        for df in (-1, 0, 1):
+            r, f = kr + dr, kf + df
+            if 0 <= r < 8 and 0 <= f < 8:
+                zone.add(chess.square(f, r))
+    return zone
+
+
+def _move_increases_king_pressure(
+    board: chess.Board,
+    move: chess.Move,
+    king_zone: set[int],
+    own_color: chess.Color,
+) -> bool:
+    """Cheap heuristic: did this piece end up attacking ≥1 king-zone square
+    that wasn't attacked by it from the from-square?"""
+    piece = board.piece_at(move.from_square)
+    if piece is None or piece.color != own_color:
+        return False
+    # Simulate without a full push() by checking destination attacks.
+    board.push(move)
+    try:
+        # The moved piece's color is `own_color`; it just moved, so the
+        # side to move has flipped. Find squares the piece now attacks.
+        attacked = board.attacks(move.to_square)
+        return any(sq in king_zone for sq in attacked)
+    finally:
+        board.pop()
 
 
 def _compute_top_p(player_rating: float) -> float:
@@ -236,6 +380,7 @@ def sample_move(
     opening_book_probs: dict[str, float] | None = None,
     apply_blind_spots: bool = True,
     time_pressure: float = 0.0,
+    game_phase: int | None = None,
 ) -> SampledMove:
     """Sample a move using blind spot biases + temperature scaling.
 
@@ -259,18 +404,32 @@ def sample_move(
     Returns:
         SampledMove with the selected move and metadata.
     """
-    # Check opening book — if the position is in the book, boost book moves
+    # Check opening book — if the position is in the book, boost book moves.
+    # PRD §5.2: `opening_loyalty` scales the magnitude of the book prior.
+    # `repertoire_width` controls how strongly the boost concentrates on
+    # the single most-played move vs spreading across the player's full
+    # repertoire at this position.
     from_book = False
     if opening_book_probs:
-        # Blend book probabilities into logits as strong priors
         from src.models.move_encoding import encode_move as _enc
+
+        loyalty = (style.opening_loyalty / 50.0) if style is not None else 1.0
+        width = (style.repertoire_width / 50.0) if style is not None else 1.0
+        # Loyalty scales the base boost (~3 by default). Width sharpens
+        # (low) or flattens (high) the distribution we boost over.
+        base_boost = 3.0 * loyalty
+        # `width` close to 0 → very sharp (concentrate on top move).
+        #             close to 1 → measured player's natural distribution.
+        #             > 1        → flatten toward uniform across book moves.
+        sharpening = max(0.2, 2.0 - width)
+
         for move_uci, book_prob in opening_book_probs.items():
             try:
                 move = chess.Move.from_uci(move_uci)
                 if move in board.legal_moves:
                     idx = _enc(move, board)
-                    # Strong logit boost proportional to book frequency
-                    policy_logits[idx] += 3.0 * book_prob
+                    sharpened = book_prob ** sharpening
+                    policy_logits[idx] += base_boost * sharpened
                     from_book = True
             except (ValueError, IndexError):
                 continue
@@ -293,7 +452,22 @@ def sample_move(
     logits[~legal_mask] = float("-inf")
 
     # Compute temperature
-    temperature = compute_temperature(predicted_cpl, blunder_prob, player_rating, style, time_pressure)
+    # Derive position eval (from the moving side's POV) from the engine
+    # top-move list if available so defensive_tenacity has signal.
+    position_eval_cp: float | None = None
+    if engine_top_moves:
+        cp = engine_top_moves[0].get("cp")
+        if cp is not None:
+            position_eval_cp = float(cp)
+    temperature = compute_temperature(
+        predicted_cpl,
+        blunder_prob,
+        player_rating,
+        style,
+        time_pressure,
+        game_phase=game_phase,
+        position_eval_cp=position_eval_cp,
+    )
 
     # Apply temperature
     scaled_logits = logits / temperature

@@ -1,13 +1,18 @@
-"""Training job management endpoints."""
+"""Training job management endpoints.
 
-import uuid
-from fastapi import APIRouter
+PRD §3.12: previously, `POST /ml/training/start` returned a job_id and
+status="queued" without actually doing anything — a caller hitting this
+endpoint would conclude that training had started when in fact nothing
+happened. That's worse than no endpoint at all. Until the real job
+queue (Celery / RQ) lands as part of PRD §5.4, both endpoints return
+501 Not Implemented and a pointer to the offline `scripts/train.py`
+entry point that actually runs a training pass.
+"""
+
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter()
-
-# In-memory job tracking (production would use a database)
-_jobs: dict[str, dict] = {}
 
 
 class TrainRequest(BaseModel):
@@ -19,38 +24,23 @@ class TrainRequest(BaseModel):
     learning_rate: float = 1e-3
 
 
-class TrainResponse(BaseModel):
-    job_id: str
-    status: str
-    message: str
-
-
 @router.post("/training/start")
-async def start_training(request: TrainRequest) -> TrainResponse:
-    """Trigger a training job.
-
-    In production, this would submit to a task queue (Celery/RQ).
-    For now, it records the job and returns immediately.
-    """
-    job_id = str(uuid.uuid4())[:8]
-
-    _jobs[job_id] = {
-        "status": "queued",
-        "phase": request.phase,
-        "config": request.model_dump(),
-    }
-
-    return TrainResponse(
-        job_id=job_id,
-        status="queued",
-        message=f"Phase {request.phase} training job queued. "
-        f"Use GET /ml/training/{job_id} to check status.",
+async def start_training(request: TrainRequest):  # noqa: ARG001
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Online training is not implemented. Run "
+            "`python scripts/train.py --phase {phase} --data {data_path}` "
+            "from the ml/ directory, or invoke "
+            "`scripts/train_all_brackets.sh` for the full bracket sweep. "
+            "Job queue support is tracked in PRD §5.4."
+        ),
     )
 
 
 @router.get("/training/{job_id}")
-async def get_training_status(job_id: str):
-    """Get the status of a training job."""
-    if job_id not in _jobs:
-        return {"error": "Job not found", "job_id": job_id}
-    return {"job_id": job_id, **_jobs[job_id]}
+async def get_training_status(job_id: str):  # noqa: ARG001
+    raise HTTPException(
+        status_code=501,
+        detail="Online training status is not implemented. See PRD §5.4.",
+    )

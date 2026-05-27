@@ -16,11 +16,15 @@ export function PracticeScreen({ onStartGame, onBack }: Props) {
   const [practiceAs, setPracticeAs] = useState<"w" | "b">("w");
   const [opponentRating, setOpponentRating] = useState(1500);
   const [previewFen, setPreviewFen] = useState("start");
+  // PRD §5.8: if a real opponent profile is loaded, let the user pick
+  // between "generic rating" or "practice vs [name]'s clone."
+  const [useClone, setUseClone] = useState(false);
 
   const setPlayerColor = useGameStore((s) => s.setPlayerColor);
   const resetGame = useGameStore((s) => s.resetGame);
   const setPendingOpeningMoves = useGameStore((s) => s.setPendingOpeningMoves);
   const setOpponent = usePlayerStore((s) => s.setOpponent);
+  const existingOpponent = usePlayerStore((s) => s.opponent);
 
   const filtered = useMemo(
     () => OPENINGS.filter((o) => o.category === category),
@@ -49,13 +53,21 @@ export function PracticeScreen({ onStartGame, onBack }: Props) {
     resetGame();
     setPlayerColor(practiceAs);
 
-    setOpponent({
-      username: `${opponentRating}-rated opponent`,
-      source: "rating",
-      rating: opponentRating,
-      numGames: 0,
-      styleSummary: null,
-    });
+    // PRD §5.8: if the user toggled "practice vs clone" and a real
+    // opponent is loaded, keep the existing profile (which carries
+    // player_key → opening book → personal explorer). Otherwise
+    // create a synthetic rating-only opponent.
+    if (useClone && existingOpponent?.playerKey) {
+      // Opponent already set in store — leave it.
+    } else {
+      setOpponent({
+        username: `${opponentRating}-rated opponent`,
+        source: "rating",
+        rating: opponentRating,
+        numGames: 0,
+        styleSummary: null,
+      });
+    }
 
     setPendingOpeningMoves(selectedOpening.moves);
     onStartGame();
@@ -63,6 +75,8 @@ export function PracticeScreen({ onStartGame, onBack }: Props) {
     selectedOpening,
     practiceAs,
     opponentRating,
+    useClone,
+    existingOpponent,
     resetGame,
     setPlayerColor,
     setOpponent,
@@ -206,31 +220,73 @@ export function PracticeScreen({ onStartGame, onBack }: Props) {
                     </div>
                   </div>
 
-                  <div>
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
-                      Opponent Rating:{" "}
-                      <span className="text-zinc-300 font-mono">
-                        {opponentRating}
-                      </span>
-                    </p>
-                    <input
-                      type="range"
-                      min={400}
-                      max={2800}
-                      step={50}
-                      value={opponentRating}
-                      onChange={(e) =>
-                        setOpponentRating(Number(e.target.value))
-                      }
-                      className="w-full accent-gold"
-                    />
-                  </div>
+                  {/* PRD §5.8: clone-aware practice toggle. Only visible
+                      when a real opponent profile has already been built. */}
+                  {existingOpponent?.playerKey && (
+                    <div>
+                      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                        Opponent
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setUseClone(false)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
+                            !useClone
+                              ? "bg-gold/10 text-gold border border-gold/20"
+                              : "bg-white/[0.04] text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          Rating-based
+                        </button>
+                        <button
+                          onClick={() => setUseClone(true)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
+                            useClone
+                              ? "bg-gold/10 text-gold border border-gold/20"
+                              : "bg-white/[0.04] text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          vs {existingOpponent.username}
+                        </button>
+                      </div>
+                      {useClone && (
+                        <p className="text-[10px] text-zinc-600 mt-1 font-light">
+                          The clone will respond with {existingOpponent.username}'s
+                          actual opening repertoire and playing style.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {!useClone && (
+                    <div>
+                      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                        Opponent Rating:{" "}
+                        <span className="text-zinc-300 font-mono">
+                          {opponentRating}
+                        </span>
+                      </p>
+                      <input
+                        type="range"
+                        min={400}
+                        max={2800}
+                        step={50}
+                        value={opponentRating}
+                        onChange={(e) =>
+                          setOpponentRating(Number(e.target.value))
+                        }
+                        className="w-full accent-gold"
+                      />
+                    </div>
+                  )}
 
                   <button
                     onClick={handleStart}
                     className="w-full py-3 bg-gold hover:brightness-110 rounded-xl text-sm font-semibold text-surface-0 transition-all shadow-lg shadow-gold/20"
                   >
-                    Practice This Opening
+                    {useClone
+                      ? `Practice vs ${existingOpponent?.username}`
+                      : "Practice This Opening"}
                   </button>
                 </div>
               </>

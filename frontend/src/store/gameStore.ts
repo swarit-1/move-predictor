@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { Chess } from "chess.js";
 
 export interface PredictionData {
@@ -113,9 +114,19 @@ interface GameState {
   tickClock: (side: "player" | "opponent", elapsed: number) => void;
   addIncrement: (side: "player" | "opponent") => void;
   onFlag: (side: "player" | "opponent") => void;
+  /** Rebuild the live `chess` instance from the persisted PGN. Called on
+   * rehydrate; safe to call manually too. */
+  rehydrateChessFromPgn: () => void;
 }
 
-export const useGameStore = create<GameState>((set, get) => ({
+// PRD §5.1 / §6.1: persist the current game across refresh so that the
+// "page hung from too many premoves → refresh → game gone" failure mode
+// reported in the audit doesn't lose the user's session. The `Chess`
+// instance is not JSON-serializable, so we persist only `pgn` and
+// reconstruct it on rehydrate.
+export const useGameStore = create<GameState>()(
+  persist(
+    (set, get) => ({
   chess: new Chess(),
   fen: new Chess().fen(),
   moveHistory: [],
@@ -344,6 +355,27 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
   },
 
+  rehydrateChessFromPgn: () => {
+    const pgn = get().pgn;
+    if (!pgn) return;
+    try {
+      const chess = new Chess();
+      chess.loadPgn(pgn);
+      set({ chess, fen: chess.fen() });
+    } catch {
+      // Corrupt persisted PGN — reset cleanly rather than crash.
+      const chess = new Chess();
+      set({
+        chess,
+        fen: chess.fen(),
+        moveHistory: [],
+        pgn: "",
+        viewIndex: -1,
+        premove: null,
+      });
+    }
+  },
+
   onFlag: (flaggedSide) => {
     const state = get();
     if (state.flagGameOver) return; // Already flagged
@@ -392,4 +424,35 @@ export const useGameStore = create<GameState>((set, get) => ({
       });
     }
   },
-}));
+    }),
+    {
+      name: "mp-game-v1",
+      storage: createJSONStorage(() => sessionStorage),
+      // The `chess` instance is not JSON-serializable. Persist only the
+      // serializable game state and rebuild `chess` on rehydrate from the
+      // PGN. Transient fields (prediction, isLoading, *Error, evalLoading,
+      // pendingOpeningMoves) are also skipped so a stale loading flag from
+      // a previous tab never freezes the UI.
+      partialize: (state) => ({
+        moveHistory: state.moveHistory,
+        pgn: state.pgn,
+        playerColor: state.playerColor,
+        mode: state.mode,
+        viewIndex: state.viewIndex,
+        timeControl: state.timeControl,
+        playerTimeLeft: state.playerTimeLeft,
+        opponentTimeLeft: state.opponentTimeLeft,
+        flagGameOver: state.flagGameOver,
+        premove: state.premove,
+        evalHistory: state.evalHistory,
+        showEvalBar: state.showEvalBar,
+        showArrows: state.showArrows,
+      }),
+      onRehydrateStorage: () => (state) => {
+        // Reconstruct the `chess` instance from the persisted PGN so the
+        // board renders the correct position on first paint after refresh.
+        state?.rehydrateChessFromPgn();
+      },
+    }
+  )
+);

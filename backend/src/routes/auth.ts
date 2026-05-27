@@ -34,8 +34,22 @@ const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
-function publicUser(u: { id: string; email: string; username: string; createdAt: Date }) {
-  return { id: u.id, email: u.email, username: u.username, createdAt: u.createdAt };
+function publicUser(u: {
+  id: string;
+  email: string;
+  username: string;
+  createdAt: Date;
+  linkedChessSource?: string | null;
+  linkedChessUsername?: string | null;
+}) {
+  return {
+    id: u.id,
+    email: u.email,
+    username: u.username,
+    createdAt: u.createdAt,
+    linkedChessSource: u.linkedChessSource ?? null,
+    linkedChessUsername: u.linkedChessUsername ?? null,
+  };
 }
 
 authRouter.post("/register", async (req: Request, res: Response) => {
@@ -114,5 +128,46 @@ authRouter.get("/me", requireAuth, async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error("Me failed", { error: error.message });
     res.status(500).json({ success: false, error: "Failed to load user" });
+  }
+});
+
+// PRD §5.6: link a Lichess / Chess.com identity to the signed-in user
+// so the "Play yourself" flow can find their games.
+const linkSchema = z.object({
+  source: z.enum(["lichess", "chesscom"]),
+  username: z.string().min(1).max(100),
+});
+
+authRouter.post("/link-chess", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const body = linkSchema.parse(req.body);
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: {
+        linkedChessSource: body.source,
+        linkedChessUsername: body.username,
+      },
+    });
+    res.json({ success: true, data: { user: publicUser(user) } });
+  } catch (error: any) {
+    if (error?.name === "ZodError") {
+      res.status(400).json({ success: false, error: error.errors?.[0]?.message || "Invalid input" });
+      return;
+    }
+    logger.error("Link chess failed", { error: error.message });
+    res.status(500).json({ success: false, error: "Failed to link chess account" });
+  }
+});
+
+authRouter.delete("/link-chess", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { linkedChessSource: null, linkedChessUsername: null },
+    });
+    res.json({ success: true, data: { user: publicUser(user) } });
+  } catch (error: any) {
+    logger.error("Unlink chess failed", { error: error.message });
+    res.status(500).json({ success: false, error: "Failed to unlink chess account" });
   }
 });

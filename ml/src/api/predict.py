@@ -53,13 +53,23 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
     if board.is_game_over():
         raise HTTPException(status_code=400, detail="Game is already over")
 
-    # Parse style overrides
+    # Parse style overrides. PRD §5.2: 10 dimensions total; older callers
+    # may only send the original 3. Anything missing falls back to the
+    # neutral midpoint of 50.
     style = None
     if request.style_overrides:
+        ov = request.style_overrides
         style = StyleOverrides(
-            aggression=request.style_overrides.get("aggression", 50.0),
-            risk_taking=request.style_overrides.get("risk_taking", 50.0),
-            blunder_frequency=request.style_overrides.get("blunder_frequency", 50.0),
+            aggression=ov.get("aggression", 50.0),
+            risk_taking=ov.get("risk_taking", 50.0),
+            blunder_frequency=ov.get("blunder_frequency", 50.0),
+            king_attack=ov.get("king_attack", 50.0),
+            positional=ov.get("positional", 50.0),
+            trade_preference=ov.get("trade_preference", 50.0),
+            opening_loyalty=ov.get("opening_loyalty", 50.0),
+            repertoire_width=ov.get("repertoire_width", 50.0),
+            endgame_strength=ov.get("endgame_strength", 50.0),
+            defensive_tenacity=ov.get("defensive_tenacity", 50.0),
         )
 
     # Get Stockfish analysis for comparison (non-blocking)

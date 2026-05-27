@@ -54,7 +54,19 @@ export function ReviewScreen({ onBack }: Props) {
     setAnalyzeProgress("Analyzing game...");
     setAnalyzeError(null);
     try {
-      const response = await reviewGame(moves, 18);
+      // PRD §5.7: if the game was played against a built clone, also
+      // ask the clone what it would have played at every non-best move
+      // on its own side. The clone is the OPPONENT — whichever colour
+      // the user wasn't playing.
+      const cloneOptions =
+        opponent?.playerKey
+          ? {
+              playerKey: opponent.playerKey,
+              color: (playerColor === "w" ? "b" : "w") as "w" | "b",
+              rating: opponent.rating,
+            }
+          : undefined;
+      const response = await reviewGame(moves, 18, cloneOptions);
       if (response.success && response.data) {
         setReviewData(
           response.data.annotations,

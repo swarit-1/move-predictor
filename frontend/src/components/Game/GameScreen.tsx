@@ -149,6 +149,30 @@ export function GameScreen({ onBack, onReview, onSave }: Props) {
     prevMoveCountRef.current = currentCount;
   }, [moveHistory.length, chess, playerColor, fetchPrediction, timeControl, addIncrement, flagGameOver]);
 
+  // PRD §6.1 watchdog: if a prediction fails or never lands, the apply
+  // effect never fires and the UI gets stuck on "opponent thinking" until
+  // the user refreshes. Whenever it's the opponent's turn but no prediction
+  // is in flight and no prediction is pending, kick off a fresh request.
+  // Backoff is implicit — fetchPrediction's AbortController cancels stale
+  // attempts, and this effect only re-runs when the relevant state changes.
+  useEffect(() => {
+    if (flagGameOver || chess.isGameOver()) return;
+    const isOpponentTurn = chess.turn() !== playerColor;
+    if (!isOpponentTurn) return;
+    if (prediction?.move) return;
+
+    const id = setTimeout(() => {
+      // Re-check inside the timer in case state changed during the wait.
+      const g = useGameStore.getState();
+      if (g.flagGameOver || g.chess.isGameOver()) return;
+      if (g.chess.turn() === playerColor) return;
+      if (g.prediction?.move) return;
+      if (g.isLoading) return;
+      fetchPrediction();
+    }, 3000);
+    return () => clearTimeout(id);
+  }, [prediction, chess, playerColor, flagGameOver, fetchPrediction]);
+
   return (
     <div className="min-h-screen bg-surface-0 text-zinc-100 flex flex-col">
 

@@ -21,7 +21,7 @@ const TIME_CONTROLS = [
   { label: "15+10", initial: 900, increment: 10 },
 ];
 
-type RatingTimeControl = "bullet" | "blitz" | "rapid" | "classical" | null;
+type RatingTimeControl = "bullet" | "blitz" | "rapid" | "classical" | "daily" | null;
 
 export function SetupScreen({ onStart, onBack }: Props) {
   const [activeTab, setActiveTab] = useState<OpponentTab>("rating");
@@ -264,12 +264,13 @@ export function SetupScreen({ onStart, onBack }: Props) {
 
 /* ── Profile Tab ─────────────────────────────────────────────── */
 
-const RATING_TC_OPTIONS: { key: RatingTimeControl; label: string; icon: string }[] = [
+const RATING_TC_OPTIONS: { key: RatingTimeControl; label: string; icon: string; chesscomOnly?: boolean; lichessOnly?: boolean }[] = [
   { key: null, label: "All", icon: "" },
   { key: "bullet", label: "1 min", icon: "" },
   { key: "blitz", label: "5 min", icon: "" },
   { key: "rapid", label: "10 min", icon: "" },
-  { key: "classical", label: "30 min", icon: "" },
+  { key: "classical", label: "30 min", icon: "", lichessOnly: true },
+  { key: "daily", label: "Daily", icon: "", chesscomOnly: true },
 ];
 
 function ProfileTab({
@@ -305,7 +306,12 @@ function ProfileTab({
         {(["lichess", "chesscom"] as const).map((s) => (
           <button
             key={s}
-            onClick={() => setSource(s)}
+            onClick={() => {
+              setSource(s);
+              // Clear source-specific TC when switching platforms.
+              if (ratingTC === "daily" && s !== "chesscom") setRatingTC(null);
+              if (ratingTC === "classical" && s !== "lichess") setRatingTC(null);
+            }}
             className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 ${
               source === s
                 ? "bg-white/[0.08] text-white ring-1 ring-white/[0.12]"
@@ -323,7 +329,13 @@ function ProfileTab({
           Rating Type
         </p>
         <div className="flex gap-1.5">
-          {RATING_TC_OPTIONS.map((opt) => (
+          {RATING_TC_OPTIONS
+            .filter((opt) => {
+              if (opt.chesscomOnly && source !== "chesscom") return false;
+              if (opt.lichessOnly && source !== "lichess") return false;
+              return true;
+            })
+            .map((opt) => (
             <button
               key={opt.key ?? "all"}
               onClick={() => setRatingTC(opt.key)}

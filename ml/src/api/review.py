@@ -43,6 +43,16 @@ def classify_move(cpl: float) -> str:
 class ReviewRequest(BaseModel):
     moves: list[str]  # UCI move strings for the full game
     depth: int = 18
+    # PRD §5.7: clone-aware review.
+    # When `clone_player_key` is supplied, for every move played by
+    # `clone_color`'s side that the engine classifies as worse than
+    # "good", we also query the prediction pipeline using the named
+    # player's profile to ask "what would the clone have played here?"
+    # — surfaced in the response so the UI can render "you blundered
+    # the move your real opponent would *not* have made."
+    clone_player_key: str | None = None
+    clone_color: str | None = None  # "w" or "b"; default = both sides off
+    clone_rating: float = 1500.0
 
 
 class MoveAnnotation(BaseModel):
@@ -59,6 +69,12 @@ class MoveAnnotation(BaseModel):
     best_move_san: str
     is_book: bool  # True for first ~8 moves (skip classification)
     top_moves: list[dict]  # engine's top 3 moves for this position
+    # PRD §5.7: clone-aware fields. Populated only for moves on the
+    # clone's color when `clone_player_key` was supplied and the move
+    # was not classified as best/excellent. None elsewhere.
+    clone_move_uci: str | None = None
+    clone_move_san: str | None = None
+    clone_matched_actual: bool | None = None
 
 
 class PlayerAccuracy(BaseModel):
@@ -156,6 +172,18 @@ async def review_game(request: ReviewRequest) -> ReviewResponse:
 
     results = await asyncio.gather(*futures, return_exceptions=True)
 
+    # PRD §5.7: prepare the clone-aware path. Validate inputs once,
+    # cache the player profile load, and short-circuit cleanly if the
+    # caller didn't ask for clone annotations.
+    clone_enabled = bool(request.clone_player_key) and request.clone_color in ("w", "b")
+    if clone_enabled:
+        # Cold-cache rehydrate if needed.
+        from src.db import cache as profile_cache
+        from src.inference.pipeline import prediction_pipeline
+        await profile_cache.hydrate_profile_into_pipeline(
+            request.clone_player_key, prediction_pipeline
+        )
+
     # Build annotations
     annotations: list[MoveAnnotation] = []
     white_cpls: list[float] = []
@@ -237,6 +265,38 @@ async def review_game(request: ReviewRequest) -> ReviewResponse:
                 black_cpls.append(cpl)
                 black_counts[classification] += 1
 
+        # PRD §5.7: query the clone only when the move is on the
+        # clone's color AND it wasn't best/excellent — the interesting
+        # case is "the clone would have avoided this slip."
+        clone_uci: str | None = None
+        clone_san: str | None = None
+        clone_matched: bool | None = None
+        if clone_enabled and not is_book:
+            mover_color = "w" if is_white_move else "b"
+            if mover_color == request.clone_color and classification not in (
+                "best", "excellent"
+            ):
+                try:
+                    from src.inference.pipeline import prediction_pipeline
+                    move_history_so_far = request.moves[:ply]
+                    clone_result = await prediction_pipeline.predict(
+                        fen=positions[ply],
+                        move_history=move_history_so_far,
+                        player_id=0,
+                        player_rating=request.clone_rating,
+                        player_key=request.clone_player_key,
+                        engine_top_moves=before.top_moves[:5],
+                    )
+                    clone_uci = clone_result.move_uci
+                    try:
+                        temp_board = chess.Board(positions[ply])
+                        clone_san = temp_board.san(clone_result.move)
+                    except Exception:
+                        clone_san = clone_uci
+                    clone_matched = clone_uci == request.moves[ply]
+                except Exception as e:
+                    logger.warning("Clone review query failed at ply %d: %s", ply, e)
+
         annotations.append(MoveAnnotation(
             ply=ply,
             move_uci=request.moves[ply],
@@ -251,6 +311,9 @@ async def review_game(request: ReviewRequest) -> ReviewResponse:
             best_move_san=best_san,
             is_book=is_book,
             top_moves=before.top_moves[:3],
+            clone_move_uci=clone_uci,
+            clone_move_san=clone_san,
+            clone_matched_actual=clone_matched,
         ))
 
     white_acc = PlayerAccuracy(

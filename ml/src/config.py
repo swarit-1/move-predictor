@@ -43,7 +43,12 @@ class Settings(BaseSettings):
     move_vocab_size: int = 1858
     history_length: int = 12
     max_players: int = 200_000
-    num_player_stats: int = 25
+    # PRD §5.2: bumped from 25 → 33 with the addition of sacrifice_rate,
+    # eval_volatility, king_attack_intensity, quiet_move_ratio,
+    # opening_cpl, middlegame_cpl, endgame_cpl, capture_initiation_rate.
+    # The MovePredictor architecture reads `num_player_stats` for the
+    # player-embedding input width, so this is the version bump.
+    num_player_stats: int = 33
     board_channels: int = 18
     num_time_controls: int = 5  # 0=unknown, 1=bullet, 2=blitz, 3=rapid, 4=classical
 

@@ -23,6 +23,12 @@ export interface MoveAnnotation {
   best_move_san: string;
   is_book: boolean;
   top_moves: Array<{ move: string; rank: number; cp: number | null; mate: number | null }>;
+  // PRD §5.7: clone-aware annotations. Populated only on the clone's
+  // side when reviewGame was called with cloneOptions, AND the move was
+  // worse than "excellent". Null otherwise.
+  clone_move_uci?: string | null;
+  clone_move_san?: string | null;
+  clone_matched_actual?: boolean | null;
 }
 
 export interface PlayerAccuracy {

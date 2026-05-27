@@ -7,12 +7,14 @@ import { PracticeScreen } from "./components/Practice/PracticeScreen";
 import { ReviewScreen } from "./components/Review/ReviewScreen";
 import { AuthScreen } from "./components/Auth/AuthScreen";
 import { HistoryScreen } from "./components/History/HistoryScreen";
+import { CoachScreen } from "./components/Coach/CoachScreen";
 import { AppHeader } from "./components/common/AppHeader";
 import { useGameStore } from "./store/gameStore";
 import { useReviewStore } from "./store/reviewStore";
 import { useAuthStore } from "./store/authStore";
 import { useSavedGamesStore, type SavedGame } from "./store/savedGamesStore";
 import { usePlayerStore } from "./store/playerStore";
+import { usePlayerProfile, usePrimePersistedOpponent } from "./hooks/usePlayerProfile";
 
 type AppPhase =
   | "welcome"
@@ -22,7 +24,8 @@ type AppPhase =
   | "practice"
   | "review"
   | "auth"
-  | "history";
+  | "history"
+  | "coach";
 
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>("welcome");
@@ -42,6 +45,11 @@ export default function App() {
     hydrate();
   }, [hydrate]);
 
+  // PRD §6.1: if a persisted opponent exists but the ML cache lost it
+  // (service restart, Redis flushed), silently rebuild the profile so the
+  // first prediction after refresh has full stats + opening book.
+  usePrimePersistedOpponent();
+
   const handlePlay = useCallback(() => setPhase("setup"), []);
   const handleReplay = useCallback(() => setPhase("replay"), []);
   const handlePractice = useCallback(() => setPhase("practice"), []);
@@ -53,6 +61,14 @@ export default function App() {
       setPhase("history");
     }
   }, [user]);
+  const handleCoach = useCallback(() => {
+    if (!user) {
+      setPostAuthPhase("coach");
+      setPhase("auth");
+    } else {
+      setPhase("coach");
+    }
+  }, [user]);
   const handleAuth = useCallback(() => {
     setPostAuthPhase(null);
     setPhase("auth");
@@ -62,6 +78,25 @@ export default function App() {
     resetGame();
     setPhase("playing");
   }, [resetGame]);
+
+  // PRD §5.6: "Play yourself" — uses the user's linked Lichess /
+  // Chess.com identity, fetches their own profile, then enters the
+  // game screen against their own clone. If the build fails for any
+  // reason we fall through to the regular setup screen.
+  const { fetchProfile } = usePlayerProfile();
+  const handlePlayYourself = useCallback(async () => {
+    if (!user) {
+      setPostAuthPhase("playing");
+      setPhase("auth");
+      return;
+    }
+    const src = user.linkedChessSource;
+    const uname = user.linkedChessUsername;
+    if (!src || !uname) return;
+    resetGame();
+    await fetchProfile(src, uname, null);
+    setPhase("playing");
+  }, [user, fetchProfile, resetGame]);
 
   const handleBackToWelcome = useCallback(() => setPhase("welcome"), []);
 
@@ -161,6 +196,8 @@ export default function App() {
         onPractice={handlePractice}
         onHistory={handleHistory}
         onAuth={handleAuth}
+        onPlayYourself={handlePlayYourself}
+        onCoach={handleCoach}
       />
     );
   } else if (phase === "setup") {
@@ -187,6 +224,8 @@ export default function App() {
         onBack={handleBackToWelcome}
       />
     );
+  } else if (phase === "coach") {
+    content = <CoachScreen onBack={handleBackToWelcome} />;
   } else {
     content = (
       <GameScreen

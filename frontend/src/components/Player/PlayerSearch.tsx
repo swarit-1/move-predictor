@@ -38,7 +38,11 @@ export function PlayerSearch() {
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="Enter username..."
+          placeholder={
+            source === "chesscom"
+              ? "Enter exact Chess.com username..."
+              : "Enter username..."
+          }
           className="flex-1 px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm
                      text-white placeholder-zinc-600 focus:border-gold/40 focus:outline-none
                      focus:ring-1 focus:ring-gold/20 transition-all duration-200"
@@ -54,6 +58,15 @@ export function PlayerSearch() {
           {opponentLoading ? "..." : "Go"}
         </button>
       </div>
+
+      {/* PRD §3.10: Chess.com publishes no autocomplete endpoint. Tell the
+          user once, near the input, instead of failing on typos. */}
+      {source === "chesscom" && (
+        <p className="text-[10px] text-zinc-600 font-light">
+          Chess.com username must be spelled exactly. There is no autocomplete
+          on Chess.com — use the URL slug from chess.com/member/…
+        </p>
+      )}
 
       {error && (
         <div className="px-4 py-3 bg-red-500/[0.05] border border-red-500/[0.1] rounded-xl">

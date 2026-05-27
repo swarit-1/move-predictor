@@ -8,6 +8,7 @@ for real human move distributions, falling back to Stockfish-based
 prediction with skill-level calibration for positions not in the explorer DB.
 """
 
+import asyncio
 import logging
 import random
 from pathlib import Path
@@ -48,6 +49,19 @@ class PredictionPipeline:
         self.opening_books: dict[str, OpeningBook] = {}  # player_key → book
         self.player_stats: dict[str, np.ndarray] = {}   # player_key → stats vector
         self.player_time_controls: dict[str, int] = {}  # player_key → TC ID
+        # PRD §5.3: position-keyed personal explorer per player. Replaces
+        # the Lichess /player explorer call for Chess.com opponents and
+        # serves as a fast local fallback for Lichess opponents.
+        from src.data.personal_explorer import PersonalExplorer  # noqa: F401
+        self.personal_explorers: dict[str, PersonalExplorer] = {}
+        # PRD §5.5: per-player fine-tuned embedding rows. Hot-swapped
+        # into the model's embedding table at inference time.
+        self._personalizations: dict[str, tuple[np.ndarray, int]] = {}
+        # PRD §6.1: serialize checkpoint swaps so concurrent profile builds
+        # for different rating brackets can't race-load the model singleton
+        # mid-inference for another request.
+        self._model_load_lock = asyncio.Lock()
+        self._loaded_checkpoint_path: str | None = None
 
     def load_model(self, checkpoint_path: str | None = None):
         """Load model from checkpoint or initialize fresh."""
@@ -78,25 +92,39 @@ class PredictionPipeline:
         logger.info(f"Model running on device: {self.device}")
 
     def load_model_for_rating(self, rating: float) -> None:
-        """Load the best available model checkpoint for a given rating."""
+        """Load the best available model checkpoint for a given rating.
+
+        Idempotent: if the same bracket is already loaded, this is a no-op.
+        Callers that may run concurrently with inference should prefer
+        `load_model_for_rating_async` to acquire the model-load mutex.
+        """
+        checkpoint_path = self._bracket_checkpoint_path(rating)
+        if checkpoint_path is None:
+            logger.info(
+                "No bracket checkpoint for rating %s, using explorer + fallback", rating
+            )
+            return
+        if checkpoint_path == self._loaded_checkpoint_path:
+            return
+        self.load_model(checkpoint_path)
+        self._loaded_checkpoint_path = checkpoint_path
+
+    async def load_model_for_rating_async(self, rating: float) -> None:
+        """Lock-protected variant. Use from async paths that can race
+        with in-flight predict() calls (e.g. build_player_profile)."""
+        async with self._model_load_lock:
+            self.load_model_for_rating(rating)
+
+    @staticmethod
+    def _bracket_checkpoint_path(rating: float) -> str | None:
+        """Return the bracket checkpoint path if it exists on disk, else None."""
         brackets = [
             (400, 800), (800, 1000), (1000, 1200), (1200, 1400),
             (1400, 1600), (1600, 1800), (1800, 2000), (2000, 2200), (2200, 2500),
         ]
-
         best_bracket = min(brackets, key=lambda b: abs((b[0] + b[1]) / 2 - rating))
-        checkpoint_path = f"data/checkpoints/{best_bracket[0]}_{best_bracket[1]}/phase1_best.pt"
-
-        if Path(checkpoint_path).exists():
-            self.load_model(checkpoint_path)
-            logger.info(
-                "Loaded %d-%d bracket model for rating %s",
-                best_bracket[0], best_bracket[1], rating,
-            )
-        else:
-            logger.info(
-                "No bracket checkpoint for rating %s, using explorer + fallback", rating
-            )
+        path = f"data/checkpoints/{best_bracket[0]}_{best_bracket[1]}/phase1_best.pt"
+        return path if Path(path).exists() else None
 
     def set_opening_book(self, player_key: str, book: OpeningBook) -> None:
         """Register an opening book for a player."""
@@ -117,6 +145,37 @@ class PredictionPipeline:
         self.player_time_controls[player_key] = tc_id
         logger.info("Stored time control for %s: %s (id=%d)", player_key, time_control, tc_id)
 
+    def set_personal_explorer(self, player_key: str, explorer) -> None:
+        """Register a per-player position-keyed move index (PRD §5.3)."""
+        self.personal_explorers[player_key] = explorer
+        logger.info(
+            "Stored personal explorer for %s: %d positions",
+            player_key, explorer.size,
+        )
+
+    def set_personalization(
+        self, player_key: str, embedding: np.ndarray, player_id: int
+    ) -> None:
+        """Cache a Phase 3 personalized embedding row in-process (PRD §5.5).
+
+        At predict time, the row is spliced into the model's embedding
+        table just before the forward pass; the same player_id is
+        passed to the model. Older personalizations are overwritten.
+        """
+        self._personalizations[player_key.lower()] = (embedding.copy(), int(player_id))
+        logger.info(
+            "Cached personalization for %s (player_id=%d, dim=%d)",
+            player_key, player_id, embedding.shape[0],
+        )
+
+    def get_personalization(
+        self, player_key: str | None
+    ) -> tuple[np.ndarray, int] | None:
+        """Return (embedding_row, player_id) if a personalization is loaded."""
+        if not player_key:
+            return None
+        return self._personalizations.get(player_key.lower())
+
     @torch.no_grad()
     async def predict(
         self,
@@ -135,6 +194,26 @@ class PredictionPipeline:
             raise RuntimeError("Model not loaded. Call load_model() first.")
 
         board = chess.Board(fen)
+
+        # PRD §6.1: cold-cache rehydrate. The frontend persists `player_key`
+        # across refreshes; if the ML process restarted (or this request hit
+        # a worker that never built the profile) we lazily pull the profile
+        # back from Redis so the user doesn't see "player not found".
+        if (
+            player_key
+            and player_key not in self.player_stats
+            and player_key not in self.opening_books
+        ):
+            from src.db import cache as profile_cache
+            await profile_cache.hydrate_profile_into_pipeline(player_key, self)
+
+        # PRD §5.5: also rehydrate any saved personalization row.
+        if player_key and player_key not in self._personalizations:
+            from src.api.personalize import load_personalization
+            personalized = await load_personalization(player_key)
+            if personalized is not None:
+                emb, pid = personalized
+                self.set_personalization(player_key, emb, pid)
 
         # Retrieve stored player stats if not explicitly provided
         if player_stats is None and player_key and player_key in self.player_stats:
@@ -185,6 +264,20 @@ class PredictionPipeline:
         history_indices = self._encode_history(move_history, board)
         history_tensor = torch.from_numpy(history_indices).unsqueeze(0).to(self.device)
 
+        # PRD §5.5: hot-swap the personalized embedding row in if Phase 3
+        # has produced one for this player. We override player_id to the
+        # personalization's stored slot.
+        personalization = self.get_personalization(player_key)
+        if personalization is not None:
+            emb_row, personalized_id = personalization
+            with torch.no_grad():
+                weight = self.model.player_embedding.player_embedding.weight
+                if personalized_id < weight.shape[0]:
+                    weight[personalized_id].copy_(
+                        torch.from_numpy(emb_row).to(weight.device)
+                    )
+                    player_id = personalized_id
+
         player_id_tensor = torch.tensor([player_id], dtype=torch.long, device=self.device)
 
         if player_stats is None:
@@ -227,6 +320,7 @@ class PredictionPipeline:
             engine_top_moves=engine_top_moves,
             opening_book_probs=opening_book_probs,
             time_pressure=time_pressure,
+            game_phase=phase,
         )
 
     async def _predict_with_data(
@@ -258,9 +352,23 @@ class PredictionPipeline:
         # Step 1: Try Lichess Opening Explorer for real human move statistics
         explorer_moves = await get_explorer_moves(board.fen(), player_rating)
 
-        # Step 2: If this is a specific Lichess player, try their personal stats
+        # Step 2a: PRD §5.3 — try the local position-keyed personal
+        # explorer. This is the Chess.com path AND a fast Lichess
+        # fallback when the upstream /player endpoint is slow or 429s.
+        personal_moves: list[dict] = []
+        if player_key and player_key in self.personal_explorers:
+            personal_moves = self.personal_explorers[player_key].get_moves(board.fen())
+
+        # Step 2b: For Lichess players, also try the upstream Player
+        # Explorer (it covers ALL of their games, not just the 200 we
+        # fetched), but only if the local personal explorer didn't already
+        # have strong coverage at this position.
         player_explorer_moves: list[dict] = []
-        if player_key and player_key.startswith("lichess:"):
+        if (
+            player_key
+            and player_key.startswith("lichess:")
+            and not _local_personal_is_strong(personal_moves)
+        ):
             username = player_key.split(":", 1)[1]
             color = "white" if board.turn == chess.WHITE else "black"
             player_explorer_moves = await get_player_explorer_moves(
@@ -275,7 +383,10 @@ class PredictionPipeline:
             total = sum(m.get("total", 0) for m in moves)
             return total >= min_games
 
-        if _has_sufficient_data(player_explorer_moves, min_games=5):
+        if _has_sufficient_data(personal_moves, min_games=3):
+            logits = explorer_moves_to_logits(personal_moves, board)
+            source = "personal_explorer"
+        elif _has_sufficient_data(player_explorer_moves, min_games=5):
             logits = explorer_moves_to_logits(player_explorer_moves, board)
             source = "player_explorer"
         elif opening_book_probs and len(opening_book_probs) >= 2:
@@ -320,7 +431,10 @@ class PredictionPipeline:
 
         # Step 5: For explorer-sourced data, reduce temperature (already human-like).
         # For stockfish fallback, apply full blind spot biases.
-        if source in ("player_explorer", "opening_book"):
+        from src.data.preprocessing import classify_game_phase
+        phase = classify_game_phase(board)
+
+        if source in ("personal_explorer", "player_explorer", "opening_book"):
             # Explorer data is already a realistic distribution — use lighter sampling
             return sample_move(
                 policy_logits=logits,
@@ -333,6 +447,7 @@ class PredictionPipeline:
                 opening_book_probs=None,  # Already baked in
                 apply_blind_spots=False,  # Data is already human-like
                 time_pressure=time_pressure,
+                game_phase=phase,
             )
         else:
             # Stockfish fallback or rating explorer — apply blind spots
@@ -346,6 +461,7 @@ class PredictionPipeline:
                 engine_top_moves=engine_top_moves,
                 opening_book_probs=opening_book_probs,
                 time_pressure=time_pressure,
+                game_phase=phase,
             )
 
     async def _get_stockfish_moves(self, fen: str) -> list[dict]:
@@ -616,23 +732,81 @@ class PredictionPipeline:
         return indices
 
 
-def _stats_to_style(stats: np.ndarray) -> StyleOverrides:
-    """Derive StyleOverrides from a player stats vector.
+def _local_personal_is_strong(moves: list[dict]) -> bool:
+    """Decide whether the local personal explorer has enough coverage at
+    this position to skip the upstream Lichess /player call (PRD §5.3).
+    Threshold: at least 5 total games across at least 2 distinct moves."""
+    if not moves or len(moves) < 2:
+        return False
+    return sum(m.get("total", 0) for m in moves) >= 5
 
-    Stats vector layout (see player_stats.py PlayerStats.to_vector()):
-      [3]  blunder_rate       → blunder_frequency (0-100)
-      [4]  aggression_index   → aggression (0-100)
-      [10] consistency        → inverse maps to risk_taking (0-100)
+
+def _stats_to_style(stats: np.ndarray) -> StyleOverrides:
+    """Derive all 10 StyleOverrides dimensions from the 33-dim stats vector.
+
+    This is the auto-derivation path: when the frontend doesn't send
+    explicit slider overrides, the pipeline calls this to produce a
+    StyleOverrides that makes the clone play like the measured player.
+    Every field maps to one or more entries in the stats vector; the
+    mapping mirrors `_derive_baseline_style` in `ml/src/api/players.py`.
+
+    Stats vector layout (player_stats.py PlayerStats.to_vector()):
+      [3]  blunder_rate         [4]  aggression_index
+      [5]  tactical_tendency    [6]  opening_diversity
+      [10] consistency          [20] exchange_tendency
+      [25] sacrifice_rate       [26] eval_volatility
+      [27] king_attack_intensity [28] quiet_move_ratio
+      [29] opening_cpl/200      [30] middlegame_cpl/200
+      [31] endgame_cpl/200      [32] capture_initiation_rate
     """
-    aggression = float(stats[4]) * 100.0           # aggression_index is 0-1
-    blunder_frequency = float(stats[3]) * 100.0    # blunder_rate is 0-1
-    consistency = float(stats[10])                 # 0=wild, 1=very consistent
-    risk_taking = (1.0 - consistency) * 100.0      # low consistency → high risk
+
+    def c(v: float) -> float:
+        return max(0.0, min(100.0, v))
+
+    aggression = float(stats[4]) * 100.0
+    blunder_frequency = float(stats[3]) * 100.0
+
+    # Risk-taking: blend eval volatility + low consistency.
+    eval_vol = float(stats[26]) if len(stats) > 26 else 0.0
+    consistency = float(stats[10])
+    risk_taking = eval_vol * 60.0 + (1.0 - consistency) * 40.0
+
+    # King attack
+    king_attack = (float(stats[27]) * 100.0) if len(stats) > 27 else 50.0
+
+    # Positional: quiet_move_ratio ~0.6 is average → maps to 50.
+    quiet = float(stats[28]) if len(stats) > 28 else 0.6
+    positional = (quiet - 0.6) * 200.0 + 50.0
+
+    # Trade preference
+    cap_init = float(stats[32]) if len(stats) > 32 else 0.5
+    trade_preference = cap_init * 100.0
+
+    # Opening loyalty (inverse diversity)
+    diversity = float(stats[6])
+    opening_loyalty = (1.0 - diversity) * 100.0
+
+    # Repertoire width (same underlying stat, opposite direction)
+    repertoire_width = diversity * 100.0
+
+    # Endgame strength: invert endgame CPL. [31] is cpl/200.
+    endgame_cpl_norm = float(stats[31]) if len(stats) > 31 else 0.25
+    endgame_strength = 100.0 - endgame_cpl_norm * 200.0
+
+    # Defensive tenacity proxy
+    defensive_tenacity = 80.0 - eval_vol * 60.0
 
     return StyleOverrides(
-        aggression=max(0.0, min(100.0, aggression)),
-        risk_taking=max(0.0, min(100.0, risk_taking)),
-        blunder_frequency=max(0.0, min(100.0, blunder_frequency)),
+        aggression=c(aggression),
+        risk_taking=c(risk_taking),
+        blunder_frequency=c(blunder_frequency),
+        king_attack=c(king_attack),
+        positional=c(positional),
+        trade_preference=c(trade_preference),
+        opening_loyalty=c(opening_loyalty),
+        repertoire_width=c(repertoire_width),
+        endgame_strength=c(endgame_strength),
+        defensive_tenacity=c(defensive_tenacity),
     )
 
 

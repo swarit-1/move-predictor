@@ -11,6 +11,9 @@ export interface AuthUser {
   email: string;
   username: string;
   createdAt: string;
+  // PRD §5.6: optional linked chess identity for the "Play yourself" flow.
+  linkedChessSource?: "lichess" | "chesscom" | null;
+  linkedChessUsername?: string | null;
 }
 
 const TOKEN_KEY = "mp_token";
@@ -27,6 +30,8 @@ interface AuthState {
   login: (identifier: string, password: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
+  // PRD §5.6
+  setUser: (user: AuthUser | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -99,4 +104,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  setUser: (user) => set({ user }),
 }));

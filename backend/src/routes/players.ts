@@ -40,6 +40,74 @@ playersRouter.post("/build-profile", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/players/:playerKey/personalize — kick off a Phase 3
+ * per-player fine-tune. PRD §5.5. Returns 412 if no bracket
+ * checkpoint exists yet, 404 if the profile isn't built.
+ */
+const personalizeSchema = z.object({
+  source: z.enum(["lichess", "chesscom"]),
+  username: z.string().min(1).max(100),
+  steps: z.number().int().min(1).max(2000).optional(),
+  batch_size: z.number().int().min(1).max(256).optional(),
+  learning_rate: z.number().min(1e-6).max(1.0).optional(),
+});
+
+playersRouter.post("/:playerKey/personalize", async (req: Request, res: Response) => {
+  try {
+    const playerKey = String(req.params.playerKey ?? "");
+    if (!playerKey) {
+      res.status(400).json({ success: false, error: "Missing player key" });
+      return;
+    }
+    const params = personalizeSchema.parse(req.body);
+    const result = await mlClient.personalizePlayer({
+      player_key: playerKey,
+      source: params.source,
+      username: params.username,
+      steps: params.steps,
+      batch_size: params.batch_size,
+      learning_rate: params.learning_rate,
+    });
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    const upstreamStatus = error?.response?.status;
+    const upstreamDetail = error?.response?.data?.detail;
+    if (upstreamStatus) {
+      res.status(upstreamStatus).json({
+        success: false,
+        error: upstreamDetail ?? error.message,
+      });
+      return;
+    }
+    logger.error("Personalize failed", { error: error.message });
+    const status = error.name === "ZodError" ? 400 : 503;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/players/profile/:playerKey — preflight check.
+ *
+ * Used by the frontend on app load to verify that a persisted
+ * playerKey (from sessionStorage) still has a cached profile on the
+ * ML side. See PRD §6.1.
+ */
+playersRouter.get("/profile/:playerKey", async (req: Request, res: Response) => {
+  try {
+    const playerKey = String(req.params.playerKey ?? "");
+    if (!playerKey) {
+      res.status(400).json({ success: false, error: "Missing player key" });
+      return;
+    }
+    const result = await mlClient.getCachedProfile(playerKey);
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    logger.error("Profile preflight failed", { error: error.message });
+    res.status(502).json({ success: false, error: "Failed to query profile cache" });
+  }
+});
+
 interface LichessPlayer {
   id: string;
   name: string;

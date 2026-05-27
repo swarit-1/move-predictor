@@ -64,6 +64,30 @@ export function MoveDetail({ annotation }: Props) {
         </div>
       )}
 
+      {/* PRD §5.7: clone divergence. When the opponent clone would have
+          played something different here, surface it. The frame colour
+          is amber for "your real opponent would not have made this
+          mistake," which is the headline insight of clone review. */}
+      {!annotation.is_book &&
+        annotation.clone_move_san &&
+        annotation.clone_matched_actual === false && (
+        <div className="bg-amber-500/[0.06] border border-amber-500/[0.12] rounded-xl p-3 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            </svg>
+            <span className="text-[10px] text-amber-400/90 uppercase tracking-wider font-medium">
+              Clone would have played
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-mono font-semibold text-amber-200">
+              {annotation.clone_move_san}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Eval bar */}
       {!annotation.is_book && (
         <div className="space-y-1.5">

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Button } from "../common/Button";
 import { useAuthStore } from "../../store/authStore";
+import { linkChessAccount } from "../../api/client";
 
 interface Props {
   onPlay: () => void;
@@ -7,6 +9,10 @@ interface Props {
   onPractice: () => void;
   onHistory?: () => void;
   onAuth?: () => void;
+  // PRD §5.6: kick off a game against the signed-in user's own clone.
+  onPlayYourself?: () => void;
+  // PRD §5.9: coach mode.
+  onCoach?: () => void;
 }
 
 interface ModeRow {
@@ -18,8 +24,46 @@ interface ModeRow {
   italic?: boolean;
 }
 
-export function WelcomeScreen({ onPlay, onReplay, onPractice, onHistory, onAuth }: Props) {
+export function WelcomeScreen({
+  onPlay,
+  onReplay,
+  onPractice,
+  onHistory,
+  onAuth,
+  onPlayYourself,
+  onCoach,
+}: Props) {
   const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+
+  // Inline form state for linking a chess account (PRD §5.6).
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkSource, setLinkSource] = useState<"lichess" | "chesscom">("lichess");
+  const [linkUsername, setLinkUsername] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  const hasLinkedChess = !!user?.linkedChessUsername;
+
+  const handleLinkSubmit = async () => {
+    if (!linkUsername.trim()) return;
+    setLinkBusy(true);
+    setLinkError(null);
+    try {
+      const res = await linkChessAccount(linkSource, linkUsername.trim());
+      if (res?.success) {
+        setUser(res.data.user);
+        setShowLinkForm(false);
+        setLinkUsername("");
+      } else {
+        setLinkError(res?.error || "Failed to link account.");
+      }
+    } catch (err: any) {
+      setLinkError(err?.response?.data?.error || err?.message || "Failed to link account.");
+    } finally {
+      setLinkBusy(false);
+    }
+  };
 
   const modes: ModeRow[] = [
     {
@@ -44,6 +88,18 @@ export function WelcomeScreen({ onPlay, onReplay, onPractice, onHistory, onAuth 
       cta: "Pick an opening",
       onClick: onPractice,
     },
+    ...(onCoach
+      ? [
+          {
+            num: "04",
+            title: "Coach",
+            body: "Discover the recurring patterns behind your blunders. The coach analyzes your saved games and surfaces position types where you consistently lose material, miss tactics, or ignore king safety.",
+            cta: "Analyze my games",
+            onClick: onCoach,
+            italic: true,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -67,6 +123,22 @@ export function WelcomeScreen({ onPlay, onReplay, onPractice, onHistory, onAuth 
             <Button size="lg" onClick={onPlay}>
               Start a game
             </Button>
+            {/* PRD §5.6: "Play yourself" — visible only when the user has
+                linked their Lichess / Chess.com username. */}
+            {user && hasLinkedChess && onPlayYourself && (
+              <Button size="lg" variant="outline" onClick={onPlayYourself}>
+                Play yourself ({user.linkedChessUsername})
+              </Button>
+            )}
+            {user && !hasLinkedChess && (
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => setShowLinkForm((v) => !v)}
+              >
+                Link my chess account
+              </Button>
+            )}
             {!user && (
               <Button size="lg" variant="outline" onClick={onAuth}>
                 Create account
@@ -78,6 +150,53 @@ export function WelcomeScreen({ onPlay, onReplay, onPractice, onHistory, onAuth 
               </Button>
             )}
           </div>
+
+          {/* PRD §5.6: inline link form. Stays compact; doesn't disturb
+              hero typography. */}
+          {showLinkForm && user && (
+            <div className="mt-6 flex flex-wrap items-center gap-2 max-w-xl">
+              <div className="flex rounded-xl border border-edge overflow-hidden">
+                {(["lichess", "chesscom"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setLinkSource(s)}
+                    className={`px-3 py-2 text-xs font-medium transition-colors ${
+                      linkSource === s
+                        ? "bg-paper/10 text-paper"
+                        : "text-walnut-300 hover:text-paper"
+                    }`}
+                  >
+                    {s === "lichess" ? "Lichess" : "Chess.com"}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={linkUsername}
+                onChange={(e) => setLinkUsername(e.target.value)}
+                placeholder={
+                  linkSource === "chesscom"
+                    ? "Exact Chess.com username"
+                    : "Lichess username"
+                }
+                className="flex-1 min-w-[160px] px-3 py-2 bg-transparent border border-edge rounded-xl text-sm text-paper placeholder-walnut-400 focus:border-paper/40 focus:outline-none"
+                onKeyDown={(e) => e.key === "Enter" && handleLinkSubmit()}
+                disabled={linkBusy}
+              />
+              <Button
+                size="sm"
+                onClick={handleLinkSubmit}
+                disabled={linkBusy || !linkUsername.trim()}
+              >
+                {linkBusy ? "Linking..." : "Save"}
+              </Button>
+              {linkError && (
+                <p className="w-full text-xs text-red-400/80 font-light">
+                  {linkError}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Featured stat panel */}
@@ -163,7 +282,7 @@ export function WelcomeScreen({ onPlay, onReplay, onPractice, onHistory, onAuth 
           <Step
             num="ii"
             title="Extract style"
-            body="Aggression, risk, opening repertoire, blunder rate, blind spots — distilled into a 25-dimensional player vector."
+            body="Aggression, risk, opening repertoire, blunder rate, blind spots — distilled into a 33-dimensional player vector across ten user-tunable axes."
             span="col-span-12 md:col-span-6 lg:col-span-4"
           />
           <Step

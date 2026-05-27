@@ -60,11 +60,20 @@ const predictSchema = z.object({
   player_id: z.number().int().optional().default(0),
   player_rating: z.number().min(0).max(4000).optional().default(1500),
   player_key: z.string().optional(),
+  // PRD §5.2: 10-dim style profile. All fields optional (clients sending
+  // only the original 3 keep working; the ML side defaults the rest to 50).
   style_overrides: z
     .object({
       aggression: z.number().min(0).max(100).optional(),
       risk_taking: z.number().min(0).max(100).optional(),
       blunder_frequency: z.number().min(0).max(100).optional(),
+      king_attack: z.number().min(0).max(100).optional(),
+      positional: z.number().min(0).max(100).optional(),
+      trade_preference: z.number().min(0).max(100).optional(),
+      opening_loyalty: z.number().min(0).max(100).optional(),
+      repertoire_width: z.number().min(0).max(100).optional(),
+      endgame_strength: z.number().min(0).max(100).optional(),
+      defensive_tenacity: z.number().min(0).max(100).optional(),
     })
     .optional(),
   time_remaining: z.number().min(0).optional(),
@@ -80,6 +89,10 @@ const analyzeSchema = z.object({
 const reviewSchema = z.object({
   moves: z.array(z.string().min(4).max(5)).min(1).max(500),
   depth: z.number().int().min(1).max(24).optional().default(18),
+  // PRD §5.7: optional clone-aware review fields
+  clone_player_key: z.string().optional(),
+  clone_color: z.enum(["w", "b"]).optional(),
+  clone_rating: z.number().min(0).max(4000).optional(),
 });
 
 /**
@@ -150,12 +163,43 @@ predictRouter.post("/analyze", async (req: Request, res: Response) => {
  * Full game review — analyzes every move and classifies them.
  * Returns per-move annotations + per-player accuracy.
  */
+/**
+ * POST /api/predict/coach — PRD §5.9.
+ * Aggregate blunder patterns across the user's games for coaching insights.
+ */
+const coachSchema = z.object({
+  pgns: z.array(z.string()).min(1).max(200),
+  player_name: z.string().min(1).max(100),
+  max_games: z.number().int().min(1).max(200).optional(),
+  stockfish_depth: z.number().int().min(1).max(18).optional(),
+});
+
+predictRouter.post("/coach", async (req: Request, res: Response) => {
+  try {
+    const params = coachSchema.parse(req.body);
+    const result = await mlClient.coachAnalysis({
+      pgns: params.pgns,
+      player_name: params.player_name,
+      max_games: params.max_games,
+      stockfish_depth: params.stockfish_depth,
+    });
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    logger.error("Coach analysis failed", { error: error.message });
+    const status = error.name === "ZodError" ? 400 : 503;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
 predictRouter.post("/review", async (req: Request, res: Response) => {
   try {
     const params = reviewSchema.parse(req.body);
     const review = await mlClient.reviewGame({
       moves: params.moves,
       depth: params.depth,
+      clone_player_key: params.clone_player_key,
+      clone_color: params.clone_color,
+      clone_rating: params.clone_rating,
     });
     res.json({ success: true, data: review });
   } catch (error: any) {
