@@ -6,12 +6,18 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 from src.models.move_predictor import MovePredictor
 from src.data.dataset import create_dataloaders

@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 
 from src.models.move_predictor import MovePredictor
@@ -48,9 +48,13 @@ class Trainer:
 
         # Device
         if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = torch.device(device)
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+        self.device = torch.device(device)
         self.model = self.model.to(self.device)
 
         # Phase-specific setup
@@ -118,9 +122,13 @@ class Trainer:
 
     def _train_epoch(self, epoch: int) -> dict[str, float]:
         """Train for one epoch."""
+        import time
+
         self.model.train()
         epoch_losses = {"total": 0, "policy": 0, "value": 0, "cpl": 0, "blunder": 0}
         num_batches = 0
+        total_batches = len(self.train_loader)
+        t_start = time.time()
 
         for batch in self.train_loader:
             batch = {k: v.to(self.device) for k, v in batch.items()}
@@ -166,6 +174,18 @@ class Trainer:
                     self.writer.add_scalar(f"train/{key}_loss", val.item(), self.global_step)
                 self.writer.add_scalar(
                     "train/lr", self.scheduler.get_last_lr()[0], self.global_step
+                )
+
+            if num_batches % 200 == 0:
+                elapsed = time.time() - t_start
+                pos_per_s = num_batches * self.train_loader.batch_size / max(elapsed, 1e-6)
+                eta_min = (total_batches - num_batches) * elapsed / max(num_batches, 1) / 60
+                logger.info(
+                    "epoch %d | batch %d/%d | loss=%.4f policy=%.4f | "
+                    "%.0f pos/s | eta %.0f min",
+                    epoch + 1, num_batches, total_batches,
+                    losses["total"].item(), losses["policy"].item(),
+                    pos_per_s, eta_min,
                 )
 
             self.global_step += 1

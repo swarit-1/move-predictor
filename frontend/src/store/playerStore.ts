@@ -14,6 +14,9 @@ export interface PlayerProfile {
   username: string;
   source: string;
   rating: number;
+  // Which site's scale `rating` is on, for "By Rating" opponents.
+  // Profile opponents infer the pool from `source` instead.
+  ratingPool?: "lichess" | "chesscom";
   numGames: number;
   styleSummary: StyleSummary | null;
   playerKey?: string;  // e.g. "lichess:DrNykterstein"

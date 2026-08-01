@@ -52,12 +52,23 @@ export function usePrediction() {
           ? `${opponent.source}:${opponent.username}`.toLowerCase()
           : undefined);
 
+      // Which rating scale the opponent's number is on: Chess.com
+      // profiles and Chess.com-scale rating opponents get translated
+      // to the internal Lichess scale by the ML service.
+      const ratingPool =
+        opponent?.source === "chesscom"
+          ? ("chesscom" as const)
+          : opponent?.source === "rating"
+            ? opponent.ratingPool
+            : undefined;
+
       const response = await predictMove(
         {
           fen,
           move_history: moveHistory,
           player_id: 0,
           player_rating: opponent?.rating || 1500,
+          rating_pool: ratingPool,
           player_key: playerKey,
           // PRD §5.2: send the full 10-dim style profile.
           style_overrides: {

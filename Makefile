@@ -51,11 +51,26 @@ download-stockfish:
 fetch-data:
 	cd ml && python3 scripts/fetch_lichess_data.py
 
+# Stream a Lichess monthly dump and fill the three lean-plan brackets with
+# eval-annotated games (override: make download-corpus MONTH=2025-06 MAX_GAMES=16000)
+MONTH ?= 2025-06
+MAX_GAMES ?= 16000
+download-corpus:
+	cd ml && python3 scripts/fast_download_corpus.py --month $(MONTH) \
+		--brackets 1000-1200 1400-1600 1800-2000 --max-games $(MAX_GAMES)
+
 preprocess:
 	cd ml && python3 scripts/preprocess_corpus.py
 
 train:
 	cd ml && python3 scripts/train.py
+
+# Download + preprocess + train one bracket end to end
+# (usage: make train-bracket MIN=1400 MAX=1600)
+MIN ?= 1400
+MAX ?= 1600
+train-bracket:
+	cd ml && bash scripts/train_rating_bracket.sh $(MIN) $(MAX) $(MONTH) $(MAX_GAMES)
 
 # ── Clean ────────────────────────────────────────────────────────────
 clean:

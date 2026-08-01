@@ -84,12 +84,15 @@ fi
 if [ -n "$SF_BIN" ]; then
   chmod +x "$SF_BIN" 2>/dev/null
   echo -e "${GREEN}Stockfish: $SF_BIN${NC}"
+  # Carry the Lichess token over from the root .env (raises explorer rate limits)
+  LICHESS_TOKEN=$(grep '^LICHESS_API_TOKEN=' "$ROOT_DIR/.env" 2>/dev/null | cut -d= -f2)
   # Write .env for ML service
   cat > "$ROOT_DIR/ml/.env" <<EOL
 STOCKFISH_PATH=$SF_BIN
 DATABASE_URL=sqlite+aiosqlite:///./move_predictor.db
 REDIS_URL=redis://localhost:6379
 DEVICE=cpu
+LICHESS_API_TOKEN=$LICHESS_TOKEN
 EOL
 else
   echo -e "${YELLOW}⚠ Stockfish not found. Engine analysis will be unavailable.${NC}"

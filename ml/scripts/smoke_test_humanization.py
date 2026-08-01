@@ -4,9 +4,7 @@ Run with: cd ml && python -m scripts.smoke_test_humanization
 """
 
 import asyncio
-import chess
 from src.inference.pipeline import PredictionPipeline
-from src.inference.sampler import StyleOverrides
 
 
 async def test_rating_differentiation():

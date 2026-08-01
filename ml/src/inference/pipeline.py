@@ -46,9 +46,17 @@ class PredictionPipeline:
         self.model: MovePredictor | None = None
         self.device = torch.device("cpu")
         self.has_checkpoint = False
+        # Which training phase produced the loaded checkpoint. Phase 1
+        # models were trained with rating-only stats vectors, so richer
+        # stats must be masked at inference to match (see _predict_with_model).
+        self.checkpoint_phase: int = 0
         self.opening_books: dict[str, OpeningBook] = {}  # player_key → book
         self.player_stats: dict[str, np.ndarray] = {}   # player_key → stats vector
         self.player_time_controls: dict[str, int] = {}  # player_key → TC ID
+        # player_key → platform-facing rating (stats vector slot 0 holds the
+        # internal Lichess-scale rating; this keeps the display honest for
+        # Chess.com players after a cache rehydrate).
+        self.player_display_ratings: dict[str, float] = {}
         # PRD §5.3: position-keyed personal explorer per player. Replaces
         # the Lichess /player explorer call for Chess.com opponents and
         # serves as a fast local fallback for Lichess opponents.
@@ -62,9 +70,15 @@ class PredictionPipeline:
         # mid-inference for another request.
         self._model_load_lock = asyncio.Lock()
         self._loaded_checkpoint_path: str | None = None
+        self._pinned_checkpoint = False
 
-    def load_model(self, checkpoint_path: str | None = None):
-        """Load model from checkpoint or initialize fresh."""
+    def load_model(self, checkpoint_path: str | None = None, pin: bool = False):
+        """Load model from checkpoint or initialize fresh.
+
+        With ``pin=True`` the loaded checkpoint stays active even when
+        later predictions ask for a different rating bracket (used by the
+        eval harness to benchmark one specific checkpoint).
+        """
         # Device selection with Apple Silicon MPS support
         if torch.cuda.is_available():
             device = "cuda"
@@ -80,15 +94,25 @@ class PredictionPipeline:
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
             self.model.load_state_dict(checkpoint["model_state_dict"])
             self.has_checkpoint = True
-            logger.info(f"Loaded model from {checkpoint_path}")
+            self.checkpoint_phase = int(checkpoint.get("phase", 1))
+            metrics = checkpoint.get("metrics", {})
+            logger.info(
+                "Loaded model from %s (phase=%d, val_top1=%.3f)",
+                checkpoint_path, self.checkpoint_phase,
+                metrics.get("top1_accuracy", float("nan")),
+            )
         else:
             self.has_checkpoint = False
+            self.checkpoint_phase = 0
             logger.info(
                 "No checkpoint loaded — using explorer + Stockfish fallback"
             )
 
         self.model = self.model.to(self.device)
         self.model.eval()
+        if checkpoint_path and self.has_checkpoint:
+            self._loaded_checkpoint_path = checkpoint_path
+        self._pinned_checkpoint = pin and self.has_checkpoint
         logger.info(f"Model running on device: {self.device}")
 
     def load_model_for_rating(self, rating: float) -> None:
@@ -98,9 +122,11 @@ class PredictionPipeline:
         Callers that may run concurrently with inference should prefer
         `load_model_for_rating_async` to acquire the model-load mutex.
         """
+        if getattr(self, "_pinned_checkpoint", False):
+            return
         checkpoint_path = self._bracket_checkpoint_path(rating)
         if checkpoint_path is None:
-            logger.info(
+            logger.debug(
                 "No bracket checkpoint for rating %s, using explorer + fallback", rating
             )
             return
@@ -117,14 +143,25 @@ class PredictionPipeline:
 
     @staticmethod
     def _bracket_checkpoint_path(rating: float) -> str | None:
-        """Return the bracket checkpoint path if it exists on disk, else None."""
+        """Return the nearest existing bracket checkpoint for this rating.
+
+        Falls back across brackets: if the exact bracket for the rating was
+        never trained, the closest trained one still serves (its rating-
+        conditioned stats input carries the requested rating). Returns None
+        only when no bracket checkpoint exists at all.
+        """
         brackets = [
             (400, 800), (800, 1000), (1000, 1200), (1200, 1400),
             (1400, 1600), (1600, 1800), (1800, 2000), (2000, 2200), (2200, 2500),
         ]
-        best_bracket = min(brackets, key=lambda b: abs((b[0] + b[1]) / 2 - rating))
-        path = f"data/checkpoints/{best_bracket[0]}_{best_bracket[1]}/phase1_best.pt"
-        return path if Path(path).exists() else None
+        candidates = [
+            (abs((lo + hi) / 2 - rating), f"data/checkpoints/{lo}_{hi}/phase1_best.pt")
+            for lo, hi in brackets
+            if Path(f"data/checkpoints/{lo}_{hi}/phase1_best.pt").exists()
+        ]
+        if not candidates:
+            return None
+        return min(candidates)[1]
 
     def set_opening_book(self, player_key: str, book: OpeningBook) -> None:
         """Register an opening book for a player."""
@@ -193,6 +230,11 @@ class PredictionPipeline:
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
 
+        # Make sure the best bracket checkpoint for this rating is loaded.
+        # Idempotent and lock-protected; a no-op when the bracket is already
+        # active or no checkpoints exist on disk.
+        await self.load_model_for_rating_async(player_rating)
+
         board = chess.Board(fen)
 
         # PRD §6.1: cold-cache rehydrate. The frontend persists `player_key`
@@ -234,10 +276,19 @@ class PredictionPipeline:
             opening_book_probs = book.get_move_probabilities(move_history) or None
 
         if self.has_checkpoint:
+            # Position-keyed personal history: what has THIS player played
+            # here before? Blended into the model logits as a prior so the
+            # clone reproduces their actual choices in familiar positions
+            # (transposition-safe, covers middlegames — not just the book).
+            personal_moves: list[dict] = []
+            if player_key and player_key in self.personal_explorers:
+                personal_moves = self.personal_explorers[player_key].get_moves(
+                    board.fen()
+                )
             return self._predict_with_model(
                 board, move_history, player_id, player_stats,
                 player_rating, style, engine_top_moves, opening_book_probs,
-                time_pressure, player_key,
+                time_pressure, player_key, personal_moves,
             )
         else:
             return await self._predict_with_data(
@@ -257,6 +308,7 @@ class PredictionPipeline:
         opening_book_probs: dict[str, float] | None = None,
         time_pressure: float = 0.0,
         player_key: str | None = None,
+        personal_moves: list[dict] | None = None,
     ) -> SampledMove:
         """Run the neural network model for prediction."""
         board_tensor = torch.from_numpy(board_to_tensor(board)).unsqueeze(0).to(self.device)
@@ -282,6 +334,16 @@ class PredictionPipeline:
 
         if player_stats is None:
             player_stats = np.zeros(settings.num_player_stats, dtype=np.float32)
+            player_stats[0] = player_rating / 3000.0
+        elif self.checkpoint_phase == 1 and personalization is None:
+            # Phase 1 checkpoints were trained with rating-only stats
+            # vectors; feeding the full 33-dim profile would push the
+            # model off its training manifold. Style still applies via
+            # the sampler. Phase 3 personalizations fine-tune against
+            # the full vector, so they keep it.
+            masked = np.zeros(settings.num_player_stats, dtype=np.float32)
+            masked[0] = player_stats[0] if player_stats[0] > 0 else player_rating / 3000.0
+            player_stats = masked
         stats_tensor = torch.from_numpy(player_stats).unsqueeze(0).to(self.device)
 
         from src.data.preprocessing import classify_game_phase
@@ -310,6 +372,11 @@ class PredictionPipeline:
         cpl_pred = max(0, outputs["cpl_pred"][0].item())
         blunder_prob = torch.sigmoid(outputs["blunder_logit"][0]).item()
 
+        if personal_moves:
+            policy_logits = self._apply_personal_prior(
+                policy_logits, board, personal_moves
+            )
+
         return sample_move(
             policy_logits=policy_logits,
             board=board,
@@ -319,9 +386,50 @@ class PredictionPipeline:
             style=style,
             engine_top_moves=engine_top_moves,
             opening_book_probs=opening_book_probs,
+            # The trained policy already encodes bracket-typical human
+            # error, so blind-spot biases run attenuated here (full
+            # strength would double-count mistakes).
+            blind_spot_scale=settings.model_path_blind_spot_scale,
             time_pressure=time_pressure,
             game_phase=phase,
         )
+
+    @staticmethod
+    def _apply_personal_prior(
+        logits: torch.Tensor,
+        board: chess.Board,
+        personal_moves: list[dict],
+    ) -> torch.Tensor:
+        """Boost moves the cloned player has actually played in this position.
+
+        The boost scales with how often they chose each move here and how
+        many total games touched the position: one stray game nudges the
+        distribution, a position they've faced ten times dominates it.
+        Boost per move = personal_prior_boost * share^0.7 * confidence,
+        where confidence = min(1, total_games_here / 6).
+        """
+        total = sum(int(m.get("total", 0)) for m in personal_moves)
+        if total <= 0:
+            return logits
+        confidence = min(1.0, total / 6.0)
+        boosted = logits.clone()
+        for m in personal_moves:
+            uci = m.get("uci")
+            count = int(m.get("total", 0))
+            if not uci or count <= 0:
+                continue
+            try:
+                move = chess.Move.from_uci(uci)
+                if move not in board.legal_moves:
+                    continue
+                idx = encode_move(move, board)
+            except (ValueError, IndexError):
+                continue
+            share = count / total
+            boosted[idx] += (
+                settings.personal_prior_boost * (share ** 0.7) * confidence
+            )
+        return boosted
 
     async def _predict_with_data(
         self,
@@ -342,7 +450,6 @@ class PredictionPipeline:
         3. Aggregate human stats at this rating level from Lichess explorer
         4. Stockfish + blind spot biases (for obscure positions)
         """
-        import asyncio
         from src.data.lichess_explorer import (
             get_explorer_moves,
             get_player_explorer_moves,

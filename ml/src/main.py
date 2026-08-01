@@ -1,8 +1,17 @@
 """FastAPI application entrypoint for the ML service."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+
+# Uvicorn only configures its own loggers; without this, every INFO line
+# from src.* (checkpoint loads, pipeline sources, auto-personalize) is
+# silently dropped.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 from src.api.health import router as health_router
 from src.api.predict import router as predict_router

@@ -379,6 +379,7 @@ def sample_move(
     engine_top_moves: list[dict] | None = None,
     opening_book_probs: dict[str, float] | None = None,
     apply_blind_spots: bool = True,
+    blind_spot_scale: float = 1.0,
     time_pressure: float = 0.0,
     game_phase: int | None = None,
 ) -> SampledMove:
@@ -440,13 +441,19 @@ def sample_move(
     # Apply style bias (aggression)
     logits = apply_style_bias(policy_logits, board, style)
 
-    # Apply blind spot biases — structured human error modeling
-    if apply_blind_spots:
+    # Apply blind spot biases — structured human error modeling.
+    # `blind_spot_scale` < 1.0 attenuates the biases (used on the trained-
+    # model path, where the policy already encodes human error patterns).
+    if apply_blind_spots and blind_spot_scale > 0.0:
         blind_spot_config = BlindSpotConfig.from_rating(player_rating, time_pressure)
+        pre_bias = logits.clone()
         bs_result = compute_blind_spot_biases(
             logits, board, blind_spot_config, engine_top_moves,
         )
-        logits = bs_result.modified_logits
+        if blind_spot_scale != 1.0:
+            logits = pre_bias + (bs_result.modified_logits - pre_bias) * blind_spot_scale
+        else:
+            logits = bs_result.modified_logits
 
     # Mask illegal moves
     logits[~legal_mask] = float("-inf")
@@ -512,10 +519,13 @@ def sample_move(
     # Decode the move
     selected_move = decode_move(move_idx, board)
 
-    # Get top-5 moves for display
+    # Get top-5 moves for display (skip zero-probability tail entries —
+    # they are outside the nucleus and would render as junk 0% rows)
     top5_values, top5_indices = probs.topk(5)
     top_moves = []
     for prob_val, idx in zip(top5_values.tolist(), top5_indices.tolist()):
+        if prob_val <= 0.0:
+            continue
         try:
             m = decode_move(idx, board)
             entry = {

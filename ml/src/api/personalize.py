@@ -27,6 +27,8 @@ import asyncio
 import base64
 import json
 import logging
+import time
+import zlib
 from io import StringIO
 
 import chess
@@ -74,6 +76,29 @@ class PersonalizeResponse(BaseModel):
     bracket_checkpoint: str
 
 
+# ── In-process status registry ────────────────────────────────────────
+# Tracks the most recent personalize attempt per player so the clone-
+# status endpoint (and the frontend fidelity badge) can render progress:
+# absent → never attempted this process; "running" → fine-tune in flight;
+# "ready" → embedding cached; "failed" → last attempt errored.
+_STATUS: dict[str, dict] = {}
+
+
+def _set_status(key: str, status: str, error: str | None = None) -> None:
+    _STATUS[key.lower()] = {
+        "status": status,
+        "error": error,
+        "updated_at": time.time(),
+    }
+
+
+def get_personalize_status(player_key: str) -> dict:
+    """Return the latest personalize attempt state for a player."""
+    return _STATUS.get(
+        player_key.lower(), {"status": "none", "error": None, "updated_at": None}
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────
 
 
@@ -82,7 +107,80 @@ async def personalize_player(
     player_key: str, request: PersonalizeRequest
 ) -> PersonalizeResponse:
     """Run Phase 3 fine-tuning to specialize the model to one player."""
+    return await run_personalize(
+        player_key,
+        source=request.source,
+        username=request.username,
+        steps=request.steps,
+        batch_size=request.batch_size,
+        learning_rate=request.learning_rate,
+    )
+
+
+async def auto_personalize(player_key: str, source: str, username: str) -> None:
+    """Background personalize trigger (fired after build-profile).
+
+    Silently skips when a personalization already exists or another run
+    is in flight; failures are recorded in the status registry and logged
+    but never propagate — the profile build already succeeded.
+    """
     key = player_key.lower()
+    if get_personalize_status(key)["status"] == "running":
+        return
+    if prediction_pipeline.get_personalization(key) is not None:
+        _set_status(key, "ready")
+        return
+    existing = await load_personalization(key)
+    if existing is not None:
+        emb, pid = existing
+        prediction_pipeline.set_personalization(key, emb, pid)
+        _set_status(key, "ready")
+        return
+    try:
+        result = await run_personalize(key, source=source, username=username)
+        logger.info(
+            "Auto-personalized %s: %d steps, final_loss=%.4f",
+            key, result.steps_run, result.final_loss,
+        )
+    except Exception as e:
+        detail = getattr(e, "detail", None) or str(e)
+        logger.warning("Auto-personalize failed for %s: %s", key, detail)
+
+
+async def run_personalize(
+    player_key: str,
+    source: str,
+    username: str,
+    steps: int = DEFAULT_STEPS,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    learning_rate: float = DEFAULT_LR,
+) -> PersonalizeResponse:
+    """Shared implementation for the endpoint and the background trigger.
+
+    The torch training loop runs in a worker thread so in-flight
+    predictions stay responsive during the ~30-90 s fine-tune.
+    """
+    key = player_key.lower()
+    _set_status(key, "running")
+    try:
+        result = await _personalize_inner(
+            key, source, username, steps, batch_size, learning_rate
+        )
+    except Exception as e:
+        _set_status(key, "failed", error=str(getattr(e, "detail", e)))
+        raise
+    _set_status(key, "ready")
+    return result
+
+
+async def _personalize_inner(
+    key: str,
+    source: str,
+    username: str,
+    steps: int,
+    batch_size: int,
+    learning_rate: float,
+) -> PersonalizeResponse:
 
     # Gate 1: profile must exist (in memory or Redis).
     if key not in prediction_pipeline.player_stats:
@@ -121,17 +219,17 @@ async def personalize_player(
     # repeat fetch this is fast.
     pgn_texts: list[str] = []
     try:
-        if request.source == "lichess":
+        if source == "lichess":
             from src.data.sources.lichess import fetch_player_games
-            async for pgn in fetch_player_games(request.username, max_games=300):
+            async for pgn in fetch_player_games(username, max_games=300):
                 pgn_texts.append(pgn)
-        elif request.source == "chesscom":
+        elif source == "chesscom":
             from src.data.sources.chesscom import fetch_player_games
-            async for pgn in fetch_player_games(request.username, max_games=300):
+            async for pgn in fetch_player_games(username, max_games=300):
                 pgn_texts.append(pgn)
         else:
             raise HTTPException(
-                status_code=400, detail=f"Unknown source: {request.source}"
+                status_code=400, detail=f"Unknown source: {source}"
             )
     except HTTPException:
         raise
@@ -145,7 +243,7 @@ async def personalize_player(
 
     # Step 2: build training tensors.
     boards, target_indices, phases = _build_training_tensors(
-        pgn_texts, request.username, MAX_POSITIONS_PER_PLAYER
+        pgn_texts, username, MAX_POSITIONS_PER_PLAYER
     )
     if len(boards) < 50:
         raise HTTPException(
@@ -161,76 +259,85 @@ async def personalize_player(
     model = prediction_pipeline.model
     if model is None:
         raise HTTPException(status_code=503, detail="Model failed to load")
-    model.setup_for_phase3()
 
-    # Phase 3 assigns one fresh embedding row per player. Use a stable
-    # hash of `player_key` so repeated calls hit the same row.
-    player_id = (hash(key) % max(settings.max_players, 1)) + 1
-    player_id_tensor = torch.tensor([player_id], dtype=torch.long)
+    # Steps 4-5 are pure torch and can take ~30-90 s; run them in a
+    # worker thread so the event loop keeps serving predictions.
+    def _train() -> tuple[np.ndarray, int, float, int]:
+        model.setup_for_phase3()
 
-    # Step 4: run the training loop. Embedding-only Phase 3 is trivial.
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(trainable_params, lr=request.learning_rate)
+        # Phase 3 assigns one fresh embedding row per player. CRC32 is
+        # stable across processes (unlike hash(), which is randomized),
+        # so repeated personalize runs always hit the same row.
+        player_id = (
+            zlib.crc32(key.encode()) % max(settings.max_players - 1, 1)
+        ) + 1
+        player_id_tensor = torch.tensor([player_id], dtype=torch.long)
 
-    final_loss = 0.0
-    steps_run = 0
-    stats_tensor_full = torch.from_numpy(stats_vec).unsqueeze(0)
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
 
-    # Move to the same device as the loaded model.
-    device = prediction_pipeline.device
-    player_id_tensor = player_id_tensor.to(device)
-    stats_tensor_full = stats_tensor_full.to(device)
+        final_loss = 0.0
+        steps_run = 0
+        stats_tensor_full = torch.from_numpy(stats_vec).unsqueeze(0)
 
-    # Mini-batches sampled at random with replacement; cheap and avoids
-    # building a full DataLoader for a 200-step pass.
-    rng = np.random.default_rng()
-    n = len(boards)
+        # Move to the same device as the loaded model.
+        device = prediction_pipeline.device
+        player_id_tensor = player_id_tensor.to(device)
+        stats_tensor_full = stats_tensor_full.to(device)
 
-    for step in range(request.steps):
-        idx = rng.integers(0, n, size=request.batch_size)
-        batch_boards = torch.from_numpy(np.stack([boards[i] for i in idx])).to(device)
-        batch_targets = torch.from_numpy(
-            np.asarray([target_indices[i] for i in idx], dtype=np.int64)
-        ).to(device)
-        batch_phases = torch.from_numpy(
-            np.asarray([phases[i] for i in idx], dtype=np.int64)
-        ).to(device)
+        # Mini-batches sampled at random with replacement; cheap and avoids
+        # building a full DataLoader for a 200-step pass.
+        rng = np.random.default_rng()
+        n = len(boards)
 
-        # Repeat the player ID + stats across the batch.
-        b = request.batch_size
-        batch_pids = player_id_tensor.expand(b)
-        batch_stats = stats_tensor_full.expand(b, -1)
-        empty_history = torch.zeros(
-            (b, settings.history_length), dtype=torch.long, device=device
-        )
+        for step in range(steps):
+            idx = rng.integers(0, n, size=batch_size)
+            batch_boards = torch.from_numpy(
+                np.stack([boards[i] for i in idx])
+            ).to(device)
+            batch_targets = torch.from_numpy(
+                np.asarray([target_indices[i] for i in idx], dtype=np.int64)
+            ).to(device)
+            batch_phases = torch.from_numpy(
+                np.asarray([phases[i] for i in idx], dtype=np.int64)
+            ).to(device)
 
-        outputs = model(
-            board_tensor=batch_boards,
-            move_history=empty_history,
-            player_id=batch_pids,
-            player_stats=batch_stats,
-            game_phase=batch_phases,
-        )
+            # Repeat the player ID + stats across the batch.
+            batch_pids = player_id_tensor.expand(batch_size)
+            batch_stats = stats_tensor_full.expand(batch_size, -1)
+            empty_history = torch.zeros(
+                (batch_size, settings.history_length), dtype=torch.long, device=device
+            )
 
-        loss = F.cross_entropy(outputs["policy_logits"], batch_targets)
+            outputs = model(
+                board_tensor=batch_boards,
+                move_history=empty_history,
+                player_id=batch_pids,
+                player_stats=batch_stats,
+                game_phase=batch_phases,
+            )
 
-        optimizer.zero_grad()
-        loss.backward()
-        # Phase 3 only updates the embedding, no need to clip.
-        optimizer.step()
+            loss = F.cross_entropy(outputs["policy_logits"], batch_targets)
 
-        final_loss = float(loss.item())
-        steps_run = step + 1
+            optimizer.zero_grad()
+            loss.backward()
+            # Phase 3 only updates the embedding, no need to clip.
+            optimizer.step()
 
-    # Step 5: extract the trained embedding row and cache it.
-    with torch.no_grad():
-        embedding_row = (
-            model.player_embedding.player_embedding.weight[player_id]
-            .detach()
-            .cpu()
-            .numpy()
-            .astype(np.float32)
-        )
+            final_loss = float(loss.item())
+            steps_run = step + 1
+
+        with torch.no_grad():
+            row = (
+                model.player_embedding.player_embedding.weight[player_id]
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.float32)
+            )
+        return row, player_id, final_loss, steps_run
+
+    embedding_row, player_id, final_loss, steps_run = await asyncio.to_thread(_train)
 
     await _save_personalization(
         key,

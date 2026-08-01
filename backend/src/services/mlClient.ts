@@ -63,6 +63,7 @@ class MLClient {
   }
 
   async predict(params: {
+    rating_pool?: "lichess" | "chesscom";
     fen: string;
     move_history?: string[];
     player_id?: number;
@@ -115,6 +116,22 @@ class MLClient {
   ): Promise<{ player_key: string; cached: boolean; location: string }> {
     const response = await this.client.get(
       `/ml/player/profile/${encodeURIComponent(playerKey)}`
+    );
+    return response.data;
+  }
+
+  // Progressive clone-fidelity stage for the opponent badge
+  // (generic → repertoire → personalized).
+  async getCloneStatus(playerKey: string): Promise<{
+    player_key: string;
+    stage: "generic" | "repertoire" | "personalized";
+    profile_loaded: boolean;
+    opening_book: { loaded: boolean; games: number };
+    personal_explorer: { loaded: boolean; positions: number };
+    personalization: { status: string; error: string | null };
+  }> {
+    const response = await this.client.get(
+      `/ml/player/clone-status/${encodeURIComponent(playerKey)}`
     );
     return response.data;
   }

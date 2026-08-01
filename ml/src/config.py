@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     board_channels: int = 18
     num_time_controls: int = 5  # 0=unknown, 1=bullet, 2=blitz, 3=rapid, 4=classical
 
+    # Inference
+    # Blind-spot logit biases on the trained-model path. The trained policy
+    # already encodes bracket-typical human error, so biases default to a
+    # reduced strength there (fallback paths always use full strength).
+    # 0.0 disables, 1.0 = full strength.
+    model_path_blind_spot_scale: float = 0.35
+    # Max logit boost added to moves the cloned player has actually played
+    # in the current position (their PersonalExplorer index). Applied on
+    # the trained-model path; 0.0 disables the prior.
+    personal_prior_boost: float = 3.0
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

@@ -28,6 +28,7 @@ export function SetupScreen({ onStart, onBack }: Props) {
   const [source, setSource] = useState<"lichess" | "chesscom">("lichess");
   const [username, setUsername] = useState("");
   const [manualRating, setManualRating] = useState(1500);
+  const [ratingPool, setRatingPool] = useState<"lichess" | "chesscom">("lichess");
   const [selectedTC, setSelectedTC] = useState(0); // index into TIME_CONTROLS
   const [ratingTC, setRatingTC] = useState<RatingTimeControl>(null); // time control for rating filtering
   const playerColor = useGameStore((s) => s.playerColor);
@@ -49,9 +50,12 @@ export function SetupScreen({ onStart, onBack }: Props) {
   const handleStart = () => {
     if (activeTab === "rating" && !opponent) {
       usePlayerStore.getState().setOpponent({
-        username: `${manualRating}-rated opponent`,
+        username: `${manualRating}-rated opponent (${
+          ratingPool === "chesscom" ? "Chess.com" : "Lichess"
+        })`,
         source: "rating",
         rating: manualRating,
+        ratingPool,
         numGames: 0,
         styleSummary: null,
       });
@@ -203,7 +207,12 @@ export function SetupScreen({ onStart, onBack }: Props) {
             )}
 
             {activeTab === "rating" && (
-              <RatingTab rating={manualRating} setRating={setManualRating} />
+              <RatingTab
+                rating={manualRating}
+                setRating={setManualRating}
+                pool={ratingPool}
+                setPool={setRatingPool}
+              />
             )}
 
             {activeTab === "style" && (
@@ -469,9 +478,13 @@ function ProfileTab({
 function RatingTab({
   rating,
   setRating,
+  pool,
+  setPool,
 }: {
   rating: number;
   setRating: (r: number) => void;
+  pool: "lichess" | "chesscom";
+  setPool: (p: "lichess" | "chesscom") => void;
 }) {
   const presets = [800, 1000, 1200, 1500, 1800, 2000, 2200, 2500];
 
@@ -491,6 +504,32 @@ function RatingTab({
       <p className="text-xs text-zinc-500 font-light">
         Set an opponent rating to simulate skill level
       </p>
+
+      <div>
+        <label className="text-xs text-zinc-400 font-medium block mb-2">
+          Rating Scale
+        </label>
+        <div className="grid grid-cols-2 gap-1.5">
+          {(["lichess", "chesscom"] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPool(p)}
+              className={`py-2 rounded-xl text-xs font-medium transition-all duration-200 ${
+                pool === p
+                  ? "bg-gold-dim text-gold ring-1 ring-gold/25"
+                  : "bg-white/[0.03] text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+              }`}
+            >
+              {p === "lichess" ? "Lichess" : "Chess.com"}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-zinc-600 mt-1.5 font-light">
+          {pool === "chesscom"
+            ? "Chess.com ratings run lower than Lichess — the opponent is calibrated to true Chess.com strength."
+            : "Ratings on the Lichess scale."}
+        </p>
+      </div>
 
       <div>
         <div className="flex items-baseline justify-between mb-3">

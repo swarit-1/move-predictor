@@ -108,6 +108,30 @@ playersRouter.get("/profile/:playerKey", async (req: Request, res: Response) => 
   }
 });
 
+/**
+ * GET /api/players/clone-status/:playerKey
+ * Progressive clone-fidelity stage for the opponent badge.
+ */
+playersRouter.get(
+  "/clone-status/:playerKey",
+  async (req: Request, res: Response) => {
+    try {
+      const playerKey = String(req.params.playerKey ?? "");
+      if (!playerKey) {
+        res.status(400).json({ success: false, error: "Missing player key" });
+        return;
+      }
+      const result = await mlClient.getCloneStatus(playerKey);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      logger.error("Clone status failed", { error: error.message });
+      res
+        .status(502)
+        .json({ success: false, error: "Failed to query clone status" });
+    }
+  }
+);
+
 interface LichessPlayer {
   id: string;
   name: string;

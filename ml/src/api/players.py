@@ -1,5 +1,6 @@
 """Player profile and embedding endpoints."""
 
+import asyncio
 import logging
 from io import StringIO
 
@@ -100,7 +101,19 @@ async def build_player_profile(request: BuildProfileRequest) -> PlayerProfile:
                     return _profile_response_from_pipeline(player_key, request)
             # Lock holder failed or timed out — fall through and rebuild
 
-        return await _do_build_profile(request, player_key)
+        profile = await _do_build_profile(request, player_key)
+
+    # Progressive clone enhancement: kick off the Phase 3 embedding
+    # fine-tune in the background (~1 min) so the clone upgrades from
+    # "repertoire" to "personalized" while the user is already playing.
+    # No-op when no bracket checkpoint exists or a run is in flight.
+    from src.api.personalize import auto_personalize
+
+    asyncio.create_task(
+        auto_personalize(player_key, request.source, request.username)
+    )
+
+    return profile
 
 
 async def _do_build_profile(
@@ -149,7 +162,6 @@ async def _do_build_profile(
 
     elif request.source == "chesscom":
         from src.data.sources.chesscom import (
-            fetch_player_stats,
             fetch_player_games,
             fetch_all_ratings,
         )
@@ -203,10 +215,20 @@ async def _do_build_profile(
     if authoritative_rating is not None:
         stats.rating = authoritative_rating
 
+    # Everything internal (bracket checkpoints, the stats vector's rating
+    # slot, sampler schedules) is Lichess-denominated. Chess.com ratings
+    # run a few hundred points lower at the same strength, so translate
+    # before conditioning — the displayed rating stays the platform one.
+    from src.data.rating_translation import to_internal_rating
+
+    internal_rating = to_internal_rating(
+        stats.rating, request.source, request.time_control
+    )
+
     # Load the rating-bracket model checkpoint for this player's rating.
     # Async + locked: concurrent profile builds don't race-load the
     # MovePredictor singleton mid-inference for another request.
-    await prediction_pipeline.load_model_for_rating_async(stats.rating)
+    await prediction_pipeline.load_model_for_rating_async(internal_rating)
 
     # Build style summary
     # Accuracy requires Stockfish analysis — mark as -1 when using default CPL
@@ -250,6 +272,10 @@ async def _do_build_profile(
     # `player_key` was computed by the caller (build_player_profile) and is
     # already lowercased — reuse the same value so cache keys line up.
     stats_vector = stats.to_vector()
+    # Rating slot conditions the model — must be on the internal scale.
+    # The platform-facing number is kept separately for display.
+    stats_vector[0] = internal_rating / 3000.0
+    prediction_pipeline.player_display_ratings[player_key] = float(stats.rating)
     prediction_pipeline.set_opening_book(player_key, book)
     prediction_pipeline.set_player_stats(player_key, stats_vector)
     prediction_pipeline.set_player_time_control(player_key, request.time_control)
@@ -365,7 +391,11 @@ def _profile_response_from_pipeline(
         # caller can fall through and rebuild.
         raise HTTPException(status_code=503, detail="Profile cache inconsistent; please retry")
 
-    rating = float(stats_vec[0]) * 3000.0  # de-normalize
+    # Prefer the platform-facing rating; stats_vec[0] is the internal
+    # (Lichess-scale) rating, which differs for Chess.com players.
+    rating = prediction_pipeline.player_display_ratings.get(
+        player_key, float(stats_vec[0]) * 3000.0
+    )
     return PlayerProfile(
         username=request.username,
         source=request.source,
@@ -408,6 +438,68 @@ async def get_cached_profile(player_key: str):
         "player_key": key,
         "cached": in_memory or in_redis,
         "location": "memory" if in_memory else ("redis" if in_redis else "none"),
+    }
+
+
+@router.get("/player/clone-status/{player_key:path}")
+async def get_clone_status(player_key: str):
+    """Progressive clone-fidelity status for the frontend badge.
+
+    Stages:
+      generic      — no profile artifacts loaded; bracket model + defaults
+      repertoire   — opening book / personal explorer / stats are active
+      personalized — a Phase 3 fine-tuned embedding row is serving
+    """
+    from src.api.personalize import get_personalize_status, load_personalization
+
+    key = player_key.lower()
+
+    # Rehydrate from Redis if this worker hasn't seen the player yet, so
+    # the badge survives ML restarts just like predictions do.
+    if key not in prediction_pipeline.player_stats:
+        await profile_cache.hydrate_profile_into_pipeline(key, prediction_pipeline)
+
+    has_stats = key in prediction_pipeline.player_stats
+    book = prediction_pipeline.opening_books.get(key)
+    explorer = prediction_pipeline.personal_explorers.get(key)
+
+    personalization = prediction_pipeline.get_personalization(key)
+    if personalization is None:
+        cached = await load_personalization(key)
+        if cached is not None:
+            emb, pid = cached
+            prediction_pipeline.set_personalization(key, emb, pid)
+            personalization = cached
+
+    p_status = get_personalize_status(key)
+    if personalization is not None:
+        p_state = "ready"
+    else:
+        p_state = p_status["status"]  # none | running | failed
+
+    if personalization is not None:
+        stage = "personalized"
+    elif has_stats or book is not None or explorer is not None:
+        stage = "repertoire"
+    else:
+        stage = "generic"
+
+    return {
+        "player_key": key,
+        "stage": stage,
+        "profile_loaded": has_stats,
+        "opening_book": {
+            "loaded": book is not None,
+            "games": book.total_games if book is not None else 0,
+        },
+        "personal_explorer": {
+            "loaded": explorer is not None,
+            "positions": explorer.size if explorer is not None else 0,
+        },
+        "personalization": {
+            "status": p_state,
+            "error": p_status.get("error"),
+        },
     }
 
 

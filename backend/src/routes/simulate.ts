@@ -16,6 +16,7 @@ interface GameSession {
   blackPlayerId: number;
   whiteRating: number;
   blackRating: number;
+  ratingPool?: "lichess" | "chesscom";
   styleOverrides?: Record<string, number>;
   createdAt: Date;
   lastAccessedAt: Date;
@@ -74,6 +75,8 @@ const startSchema = z.object({
   black_player_id: z.number().int().optional().default(0),
   white_rating: z.number().optional().default(1500),
   black_rating: z.number().optional().default(1500),
+  // Which site's scale the ratings are on (ML translates chesscom).
+  rating_pool: z.enum(["lichess", "chesscom"]).optional(),
   style_overrides: z.record(z.number()).optional(),
   time_control: z
     .object({
@@ -110,6 +113,7 @@ simulateRouter.post("/start", (req: Request, res: Response) => {
       blackPlayerId: params.black_player_id,
       whiteRating: params.white_rating,
       blackRating: params.black_rating,
+      ratingPool: params.rating_pool,
       styleOverrides: params.style_overrides,
       createdAt: now,
       lastAccessedAt: now,
@@ -201,8 +205,14 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
     }
 
     if (move) {
-      // Human plays a move
-      const result = session.chess.move(move);
+      // Human plays a move. chess.js v1 throws on illegal moves rather
+      // than returning null, so both failure modes map to a 400 here.
+      let result;
+      try {
+        result = session.chess.move(move);
+      } catch {
+        result = null;
+      }
       if (!result) {
         res.status(400).json({ success: false, error: "Illegal move" });
         return;
@@ -243,13 +253,23 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
         move_history: session.moveHistory,
         player_id: playerId,
         player_rating: rating,
+        rating_pool: session.ratingPool,
         style_overrides: session.styleOverrides,
         time_remaining: timeRemaining,
         time_control_initial: timeControlInitial,
       });
 
-      // Apply the predicted move
-      const aiResult = session.chess.move(prediction.move);
+      // Apply the predicted move (defensive: treat an unplayable
+      // prediction as "no AI move" rather than a 500)
+      let aiResult;
+      try {
+        aiResult = session.chess.move(prediction.move);
+      } catch {
+        aiResult = null;
+        logger.warn(
+          `ML returned unplayable move ${prediction.move} for session ${session.id}`
+        );
+      }
       if (aiResult) {
         session.moveHistory.push(aiResult.lan);
 

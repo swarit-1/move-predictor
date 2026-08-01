@@ -156,7 +156,16 @@ async def hydrate_profile_into_pipeline(player_key: str, pipeline) -> bool:
             pipeline.set_personal_explorer(player_key, pe)
         rating = cached.get("rating")
         if rating is not None:
-            pipeline.load_model_for_rating(float(rating))
+            pipeline.player_display_ratings[player_key] = float(rating)
+            # The cached rating is platform-facing; bracket selection is
+            # Lichess-denominated. The pool is the player_key's prefix.
+            from src.data.rating_translation import to_internal_rating
+
+            pool = player_key.split(":", 1)[0]
+            tc_id = cached.get("time_control")
+            pipeline.load_model_for_rating(
+                to_internal_rating(float(rating), pool, tc_id)
+            )
         logger.info("Hydrated profile %s from Redis", player_key)
         return True
     except Exception as e:

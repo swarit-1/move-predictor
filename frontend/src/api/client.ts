@@ -108,6 +108,7 @@ export async function predictMove(
     move_history?: string[];
     player_id?: number;
     player_rating?: number;
+    rating_pool?: "lichess" | "chesscom";
     player_key?: string;
     style_overrides?: {
       aggression?: number;
@@ -203,6 +204,28 @@ export async function checkCachedProfile(playerKey: string) {
     `/players/profile/${encodeURIComponent(playerKey)}`
   );
   return data;
+}
+
+export type CloneStage = "generic" | "repertoire" | "personalized";
+
+export interface CloneStatus {
+  player_key: string;
+  stage: CloneStage;
+  profile_loaded: boolean;
+  opening_book: { loaded: boolean; games: number };
+  personal_explorer: { loaded: boolean; positions: number };
+  personalization: { status: string; error: string | null };
+}
+
+/**
+ * Progressive clone-fidelity stage for the opponent badge
+ * (generic → repertoire → personalized).
+ */
+export async function getCloneStatus(playerKey: string) {
+  const { data } = await api.get(
+    `/players/clone-status/${encodeURIComponent(playerKey)}`
+  );
+  return data as { success: boolean; data: CloneStatus };
 }
 
 /**

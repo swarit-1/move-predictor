@@ -1,146 +1,254 @@
 """Preprocess PGN files into HDF5 training data.
 
-Reads PGN files from data/raw/, extracts features for every position,
-and optionally annotates with Stockfish analysis.
+Reads PGN files from data/raw/, extracts features for every position, and
+derives eval / centipawn-loss / blunder labels from embedded Lichess
+`[%eval]` annotations when present (games downloaded with
+`fast_download_corpus.py` always have them). Positions from games without
+annotations still train the policy head; their error labels stay 0.
+
+Games are processed in parallel worker processes and streamed into the
+output HDF5 files, so memory stays flat regardless of corpus size.
 
 Usage:
-    python scripts/preprocess_corpus.py data/raw/player.pgn --output data/processed/train.h5
-    python scripts/preprocess_corpus.py data/raw/ --output data/processed/train.h5 --stockfish
+    python3 scripts/preprocess_corpus.py data/raw/games.pgn --output data/processed/train.h5
+    python3 scripts/preprocess_corpus.py data/raw/ --output data/processed/train.h5 --workers 8
 """
 
 import argparse
+import random
 import sys
+from io import StringIO
+from multiprocessing import Pool
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import chess
 import chess.pgn
-from src.data.sources.pgn_loader import parse_pgn_file, game_to_moves, game_metadata
-from src.data.feature_extraction import extract_position_features
-from src.data.dataset import save_to_hdf5
+import h5py
+import numpy as np
+
+from src.config import settings
+from src.data.preprocessing import board_to_tensor, classify_game_phase
+from src.data.feature_extraction import _parse_time_control_from_pgn
 from src.models.move_encoding import encode_move
 
+FIELDS = {
+    "board_tensor": ("float32", (18, 8, 8)),
+    "move_history": ("int64", (settings.history_length,)),
+    "player_id": ("int64", ()),
+    "player_stats": ("float32", (settings.num_player_stats,)),
+    "game_phase": ("int64", ()),
+    "time_control": ("int64", ()),
+    "move_index": ("int64", ()),
+    "eval_score": ("float32", ()),
+    "centipawn_loss": ("float32", ()),
+    "is_blunder": ("float32", ()),
+}
 
-def preprocess_file(
-    filepath: str,
-    use_stockfish: bool = False,
-    stockfish_depth: int = 12,
-    max_games: int | None = None,
-) -> list[list[dict]]:
-    """Preprocess a single PGN file into per-game position lists.
+# Blunder threshold in centipawns, matching src/engine/analysis.py
+BLUNDER_CPL = 100.0
+# Conventional evaluation of the starting position (white POV, centipawns)
+STARTPOS_EVAL = 17.0
 
-    Returns a list of games, where each game is a list of feature dicts.
-    Grouping by game prevents data leakage when splitting train/val.
+
+def process_game_text(pgn_text: str) -> dict[str, np.ndarray] | None:
+    """Convert one PGN game into stacked per-position feature arrays.
+
+    History indices are built incrementally (single pass) instead of
+    replaying the full game per position.
     """
-    game_positions: list[list[dict]] = []
-    games_processed = 0
-    total_positions = 0
+    game = chess.pgn.read_game(StringIO(pgn_text))
+    if game is None:
+        return None
 
-    print(f"Processing {filepath}...")
+    headers = game.headers
+    try:
+        white_elo = int(headers.get("WhiteElo", "1500"))
+    except ValueError:
+        white_elo = 1500
+    try:
+        black_elo = int(headers.get("BlackElo", "1500"))
+    except ValueError:
+        black_elo = 1500
+    time_control = _parse_time_control_from_pgn(headers.get("TimeControl", ""))
 
-    for game in parse_pgn_file(filepath):
-        if max_games and games_processed >= max_games:
-            break
+    T = settings.history_length
+    board = game.board()
+    encoded_hist: list[int] = []
+    prev_eval_white: float | None = STARTPOS_EVAL if board == chess.Board() else None
 
-        metadata = game_metadata(game)
-        moves = game_to_moves(game)
-        board = game.board()
-        move_history: list = []
-        positions: list[dict] = []
+    rows: dict[str, list] = {name: [] for name in FIELDS}
 
-        for move in moves:
-            try:
-                features = extract_position_features(
-                    board=board,
-                    move=move,
-                    move_history=move_history.copy(),
-                    player_rating=metadata.get("white_elo") or 1500
-                    if board.turn == chess.WHITE
-                    else metadata.get("black_elo") or 1500,
-                )
-                positions.append(features)
-            except (ValueError, IndexError):
-                pass
+    for node in game.mainline():
+        move = node.move
+        mover_white = board.turn == chess.WHITE
+        rating = white_elo if mover_white else black_elo
 
-            move_history.append(move)
+        try:
+            move_idx = encode_move(move, board)
+        except (ValueError, IndexError):
             board.push(move)
+            encoded_hist.append(0)
+            prev_eval_white = None
+            continue
 
-        if positions:
-            game_positions.append(positions)
-            total_positions += len(positions)
+        # Eval after the move, white POV, clamped to +/-1000 cp
+        score = node.eval()
+        if score is not None:
+            eval_after_white = float(score.white().score(mate_score=1000))
+            eval_after_white = max(-1000.0, min(1000.0, eval_after_white))
+        else:
+            board.push(move)
+            if board.is_checkmate():
+                eval_after_white = 1000.0 if mover_white else -1000.0
+            else:
+                eval_after_white = prev_eval_white  # carry forward (no analysis)
+            board.pop()
 
-        games_processed += 1
-        if games_processed % 100 == 0:
-            print(f"  Processed {games_processed} games, {total_positions} positions")
+        # Labels from consecutive evals (mover's POV)
+        if prev_eval_white is not None and eval_after_white is not None:
+            sign = 1.0 if mover_white else -1.0
+            eval_before_pov = sign * prev_eval_white
+            eval_after_pov = sign * eval_after_white
+            cpl = max(0.0, eval_before_pov - eval_after_pov)
+            eval_score = max(-1.0, min(1.0, eval_before_pov / 1000.0))
+            is_blunder = float(cpl >= BLUNDER_CPL)
+        else:
+            cpl, eval_score, is_blunder = 0.0, 0.0, 0.0
 
-    print(f"  Total: {games_processed} games, {total_positions} positions from {filepath}")
-    return game_positions
+        hist = np.zeros(T, dtype=np.int64)
+        recent = encoded_hist[-T:]
+        if recent:
+            hist[T - len(recent):] = recent
+
+        stats = np.zeros(settings.num_player_stats, dtype=np.float32)
+        stats[0] = rating / 3000.0
+
+        rows["board_tensor"].append(board_to_tensor(board))
+        rows["move_history"].append(hist)
+        rows["player_id"].append(0)
+        rows["player_stats"].append(stats)
+        rows["game_phase"].append(classify_game_phase(board))
+        rows["time_control"].append(time_control)
+        rows["move_index"].append(move_idx)
+        rows["eval_score"].append(eval_score)
+        rows["centipawn_loss"].append(min(cpl / 500.0, 1.0))
+        rows["is_blunder"].append(is_blunder)
+
+        encoded_hist.append(move_idx)
+        board.push(move)
+        prev_eval_white = eval_after_white
+
+    if not rows["move_index"]:
+        return None
+
+    out: dict[str, np.ndarray] = {}
+    for name, (dtype, shape) in FIELDS.items():
+        if shape:
+            out[name] = np.stack(rows[name]).astype(dtype)
+        else:
+            out[name] = np.array(rows[name], dtype=dtype)
+    return out
+
+
+def iter_game_blocks(filepath: str):
+    """Yield raw PGN text per game without parsing."""
+    lines: list[str] = []
+    with open(filepath, errors="replace") as f:
+        for line in f:
+            if line.startswith("[Event ") and lines:
+                yield "".join(lines)
+                lines = [line]
+            else:
+                lines.append(line)
+    if lines:
+        yield "".join(lines)
+
+
+class ShardWriter:
+    """Streams position batches into a resizable HDF5 file."""
+
+    def __init__(self, path: str):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self.file = h5py.File(path, "w")
+        self.count = 0
+        self.games = 0
+        for name, (dtype, shape) in FIELDS.items():
+            # Small chunks: training does random single-row reads, and
+            # HDF5 always reads whole chunks — big chunks amplify I/O ~300x.
+            self.file.create_dataset(
+                name,
+                shape=(0, *shape),
+                maxshape=(None, *shape),
+                dtype=dtype,
+                chunks=(4, *shape),
+            )
+
+    def append(self, arrays: dict[str, np.ndarray]):
+        n = arrays["move_index"].shape[0]
+        for name in FIELDS:
+            ds = self.file[name]
+            ds.resize(self.count + n, axis=0)
+            ds[self.count:self.count + n] = arrays[name]
+        self.count += n
+        self.games += 1
+
+    def close(self):
+        self.file.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Preprocess PGN files into HDF5")
     parser.add_argument("input", help="PGN file or directory of PGN files")
     parser.add_argument("--output", default="data/processed/train.h5", help="Output HDF5 path")
-    parser.add_argument("--stockfish", action="store_true", help="Add Stockfish annotations")
     parser.add_argument("--max-games", type=int, default=None, help="Max games per file")
     parser.add_argument("--val-split", type=float, default=0.05, help="Validation split ratio")
-
+    parser.add_argument("--workers", type=int, default=8, help="Parallel worker processes")
+    parser.add_argument("--seed", type=int, default=7, help="Split RNG seed")
     args = parser.parse_args()
 
     input_path = Path(args.input)
-    all_games: list[list[dict]] = []
-
     if input_path.is_file():
-        all_games = preprocess_file(
-            str(input_path),
-            use_stockfish=args.stockfish,
-            max_games=args.max_games,
-        )
+        pgn_files = [input_path]
     elif input_path.is_dir():
-        for pgn_file in sorted(input_path.glob("*.pgn")):
-            games = preprocess_file(
-                str(pgn_file),
-                use_stockfish=args.stockfish,
-                max_games=args.max_games,
-            )
-            all_games.extend(games)
+        pgn_files = sorted(input_path.glob("*.pgn"))
     else:
         print(f"Error: {input_path} is not a file or directory")
         sys.exit(1)
 
-    if not all_games:
-        print("No positions extracted!")
-        sys.exit(1)
+    def blocks():
+        for pgn_file in pgn_files:
+            print(f"Processing {pgn_file}...")
+            for i, block in enumerate(iter_game_blocks(str(pgn_file))):
+                if args.max_games and i >= args.max_games:
+                    break
+                yield block
 
-    # Split by GAME (not by position) to prevent data leakage
-    import random
-    random.shuffle(all_games)
-    val_count = int(len(all_games) * args.val_split)
-    val_games = all_games[:val_count]
-    train_games = all_games[val_count:]
+    rng = random.Random(args.seed)
+    train_writer = ShardWriter(args.output)
+    val_writer = ShardWriter(str(args.output).replace("train", "val"))
 
-    # Flatten games into position lists
-    train_data = [pos for game in train_games for pos in game]
-    val_data = [pos for game in val_games for pos in game]
+    with Pool(processes=args.workers) as pool:
+        for arrays in pool.imap_unordered(process_game_text, blocks(), chunksize=16):
+            if arrays is None:
+                continue
+            # Split by GAME (not position) to prevent leakage
+            writer = val_writer if rng.random() < args.val_split else train_writer
+            writer.append(arrays)
+            done = train_writer.games + val_writer.games
+            if done % 1000 == 0:
+                print(
+                    f"  {done} games, {train_writer.count + val_writer.count} positions",
+                    flush=True,
+                )
 
-    # Shuffle positions within each split
-    random.shuffle(train_data)
-    random.shuffle(val_data)
-
-    total = len(train_data) + len(val_data)
-    print(f"\nSplit: {len(train_games)} train games, {len(val_games)} val games")
-    print(f"       {len(train_data)} train positions, {len(val_data)} val positions")
-
-    # Save
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    save_to_hdf5(train_data, str(output_path))
-    print(f"Saved {len(train_data)} training positions to {output_path}")
-
-    val_path = str(output_path).replace("train", "val")
-    if val_data:
-        save_to_hdf5(val_data, val_path)
-        print(f"Saved {len(val_data)} validation positions to {val_path}")
+    print(f"\nSplit: {train_writer.games} train games, {val_writer.games} val games")
+    print(f"Saved {train_writer.count} training positions to {train_writer.path}")
+    print(f"Saved {val_writer.count} validation positions to {val_writer.path}")
+    train_writer.close()
+    val_writer.close()
 
 
 if __name__ == "__main__":

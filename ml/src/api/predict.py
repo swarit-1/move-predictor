@@ -12,6 +12,10 @@ class PredictRequest(BaseModel):
     move_history: list[str] = []
     player_id: int = 0
     player_rating: float = 1500.0
+    # Which site's scale `player_rating` is on: "lichess" (default) or
+    # "chesscom". Everything internal is Lichess-denominated, so Chess.com
+    # ratings are translated on the way in (see data/rating_translation.py).
+    rating_pool: str | None = None
     player_key: str | None = None  # source:username for opening book lookup
     style_overrides: dict | None = None  # {aggression, risk_taking, blunder_frequency}
     time_remaining: float | None = None  # seconds left on opponent's clock
@@ -49,6 +53,18 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
         board = chess.Board(request.fen)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid FEN: {request.fen}")
+
+    # Normalize the rating to the internal (Lichess) scale. The time class
+    # for the translation curve is inferred from the game's time control.
+    from src.data.rating_translation import to_internal_rating
+
+    time_class = None
+    if request.time_control_initial:
+        secs = request.time_control_initial
+        time_class = "bullet" if secs < 180 else "blitz" if secs < 600 else "rapid"
+    internal_rating = to_internal_rating(
+        request.player_rating, request.rating_pool, time_class
+    )
 
     if board.is_game_over():
         raise HTTPException(status_code=400, detail="Game is already over")
@@ -102,7 +118,7 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             fen=request.fen,
             move_history=request.move_history,
             player_id=request.player_id,
-            player_rating=request.player_rating,
+            player_rating=internal_rating,
             style=style,
             engine_top_moves=engine_top_moves,
             player_key=request.player_key,
@@ -119,7 +135,7 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             sampled=result,
             engine_best_move=engine_best,
             engine_top_moves=engine_top_moves,
-            player_rating=request.player_rating,
+            player_rating=internal_rating,
             game_phase=game_phase,
         )
         explanation = {

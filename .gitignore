@@ -75,3 +75,7 @@ tb_logs/
 htmlcov/
 .pytest_cache/
 coverage/
+
+# ML runtime data (corpora, checkpoints, eval sets)
+ml/data/
+.ruff_cache/

@@ -368,7 +368,14 @@ Games can be sourced from three inputs:
 
 The Lichess client streams games using `aiter_lines()` for memory efficiency and supports filtering by game type (blitz, rapid, classical) and rated-only games. The Chess.com client fetches monthly archives in reverse chronological order.
 
-**Implementation:** [ml/src/data/sources/lichess.py](ml/src/data/sources/lichess.py), [ml/src/data/sources/chesscom.py](ml/src/data/sources/chesscom.py), [ml/src/data/sources/pgn_loader.py](ml/src/data/sources/pgn_loader.py)
+For bulk training corpora, `ml/scripts/fast_download_corpus.py` streams a monthly Lichess database dump (`curl | zstd -d`) and filters it with plain text matching instead of full PGN parsing — roughly 100x faster than the python-chess path (~2.7M games/minute scanned). One pass fills every requested rating bracket simultaneously, and only games carrying Lichess `[%eval]` server-analysis annotations are kept, so every training position gets real eval/CPL/blunder labels for free:
+
+```bash
+cd ml && python3 scripts/fast_download_corpus.py --month 2025-06 \
+    --brackets 1000-1200 1400-1600 1800-2000 --max-games 16000
+```
+
+**Implementation:** [ml/src/data/sources/lichess.py](ml/src/data/sources/lichess.py), [ml/src/data/sources/chesscom.py](ml/src/data/sources/chesscom.py), [ml/src/data/sources/pgn_loader.py](ml/src/data/sources/pgn_loader.py), [ml/scripts/fast_download_corpus.py](ml/scripts/fast_download_corpus.py)
 
 ### Preprocessing
 
@@ -387,7 +394,9 @@ For each game, every position is processed into a training example:
 
 ### Stockfish Annotation
 
-A process pool of Stockfish instances analyzes positions concurrently:
+**Primary label source — Lichess `[%eval]` annotations.** Corpora downloaded with `fast_download_corpus.py` contain only games with embedded Lichess server analysis, and `preprocess_corpus.py` derives the eval / centipawn-loss / blunder training labels directly from those comments. No local Stockfish pass is needed for bulk training data — the labels come from Lichess's own Stockfish analysis at zero compute cost.
+
+For data without `[%eval]` annotations (e.g. Chess.com profile builds), a process pool of Stockfish instances analyzes positions concurrently:
 
 - **Depth 18** for curated datasets (high accuracy).
 - **Depth 12** for bulk preprocessing (faster, minimal accuracy loss for move quality classification).
@@ -427,7 +436,27 @@ Splits are by **game** (not by position) to prevent data leakage: 90% train / 5%
 
 ## Training Strategy
 
-Training proceeds in three phases, each building on the previous checkpoint:
+Training proceeds in three phases, each building on the previous checkpoint.
+
+Per-bracket Phase 1 checkpoints are trained locally (Apple Silicon MPS works out of the box — the trainer auto-detects `cuda` → `mps` → `cpu`) with the lean recipe:
+
+```bash
+cd ml
+# 1. Download eval-annotated games for the brackets you care about (one pass)
+python3 scripts/fast_download_corpus.py --month 2025-06 \
+    --brackets 1000-1200 1400-1600 1800-2000 --max-games 16000
+# 2. Preprocess each bracket ([%eval] → labels; parallel workers)
+python3 scripts/preprocess_corpus.py data/raw/lichess_2025-06_1400-1600.pgn \
+    --output data/processed/train_1400_1600.h5 --val-split 0.05
+# 3. Train the bracket
+python3 scripts/train.py --phase 1 \
+    --data data/processed/train_1400_1600.h5 \
+    --val-data data/processed/val_1400_1600.h5 \
+    --epochs 2 --batch-size 256 \
+    --checkpoint-dir data/checkpoints/1400_1600 --log-dir runs/1400_1600
+```
+
+Or use `bash scripts/train_rating_bracket.sh 1400 1600 2025-06 16000` which runs all three steps. The prediction pipeline discovers checkpoints at `ml/data/checkpoints/{min}_{max}/phase1_best.pt` automatically at predict time and loads the nearest trained bracket for any requested rating — no restart or configuration needed.
 
 ### Phase 1: Pretrain on Large Corpus
 
@@ -512,7 +541,7 @@ The startup script automatically:
 
 Services:
 - ML service on `http://localhost:8000` (uvicorn with hot reload)
-- Backend on `http://localhost:3000` (tsx with hot reload)
+- Backend on `http://localhost:3001` (tsx with hot reload)
 - Frontend on `http://localhost:5173` (Vite dev server)
 
 Logs are written to `.dev-logs/` (ml.log, backend.log, frontend.log).
@@ -552,14 +581,18 @@ A typical workflow from zero to playing against a simulated opponent:
 # 1. Download and install Stockfish
 make download-stockfish
 
-# 2. Fetch games for a specific player
-cd ml && python3 scripts/fetch_lichess_data.py DrNykterstein --max-games 1000
+# 2. Download an eval-annotated training corpus (per rating bracket)
+cd ml && python3 scripts/fast_download_corpus.py --month 2025-06 \
+    --brackets 1400-1600 --max-games 16000
 
-# 3. Preprocess games into HDF5 training data
-python3 scripts/preprocess_corpus.py data/raw/ --output data/processed/train.h5 --val-split 0.05
+# 3. Preprocess games into HDF5 training data ([%eval] → labels)
+python3 scripts/preprocess_corpus.py data/raw/lichess_2025-06_1400-1600.pgn \
+    --output data/processed/train_1400_1600.h5 --val-split 0.05
 
-# 4. Train Phase 1 (general human move prediction)
-python3 scripts/train.py --phase 1 --data data/processed/train.h5 --val-data data/processed/val.h5 --epochs 20
+# 4. Train Phase 1 (general human move prediction for the bracket)
+python3 scripts/train.py --phase 1 --data data/processed/train_1400_1600.h5 \
+    --val-data data/processed/val_1400_1600.h5 --epochs 2 --batch-size 256 \
+    --checkpoint-dir data/checkpoints/1400_1600 --log-dir runs/1400_1600
 
 # 5. Start the services
 cd .. && ./start-dev.sh
@@ -577,7 +610,7 @@ Alternatively, use the API directly:
 
 ```bash
 # Predict the most likely human move
-curl -X POST http://localhost:3000/api/predict \
+curl -X POST http://localhost:3001/api/predict \
   -H "Content-Type: application/json" \
   -d '{
     "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
@@ -655,6 +688,7 @@ Internal service — the Node.js gateway is the only expected consumer.
   "move_history": ["e2e4"],
   "player_id": 0,
   "player_rating": 1500.0,
+  "rating_pool": "chesscom",
   "player_key": "lichess:DrNykterstein",
   "style_overrides": {
     "aggression": 70,
@@ -707,17 +741,17 @@ Start a game, then alternate between your moves and AI moves:
 
 ```bash
 # Start
-curl -X POST http://localhost:3000/api/simulate/start \
+curl -X POST http://localhost:3001/api/simulate/start \
   -H "Content-Type: application/json" \
   -d '{"black_rating": 1500}'
 
 # Play e4 (your move), AI responds
-curl -X POST http://localhost:3000/api/simulate/<session_id>/move \
+curl -X POST http://localhost:3001/api/simulate/<session_id>/move \
   -H "Content-Type: application/json" \
   -d '{"move": "e2e4"}'
 
 # Get current state
-curl http://localhost:3000/api/simulate/<session_id>
+curl http://localhost:3001/api/simulate/<session_id>
 ```
 
 ---
@@ -736,7 +770,7 @@ Three mode cards with descriptions and icons:
 - **Color Selection** — Choose to play as White or Black before the game starts.
 - **Opponent Configuration** — Three tabs for selecting your opponent:
   - **Player Profile** — Search for a real Lichess/Chess.com player. Ratings are fetched from the platform's profile API (authoritative current rating, not PGN headers).
-  - **By Rating** — Select a target ELO (400–2800) to play against a generic opponent of that skill level.
+  - **By Rating** — Select a target ELO (400–2800) to play against a generic opponent of that skill level, on either the **Lichess or Chess.com rating scale**. The two pools are calibrated differently (a Chess.com 1500 blitz is roughly a Lichess ~1780); the ML service translates Chess.com ratings internally (`ml/src/data/rating_translation.py`) so the opponent plays at true strength either way. Chess.com player profiles get the same translation automatically.
   - **Custom Style** — Fine-tune aggression, risk-taking, and blunder frequency sliders to craft a specific play style.
 - **Time Control** — Choose from 8 presets (No Clock, 1+0 Bullet through 15+10 Rapid). Time controls affect AI think time and decision quality under pressure.
 
@@ -801,7 +835,7 @@ All configuration is via environment variables (see [.env.example](.env.example)
 | `CHECKPOINT_DIR` | `data/checkpoints` | Model checkpoint directory |
 | `LOG_DIR` | `runs` | TensorBoard log directory |
 | `BACKEND_PORT` | `3000` | Node.js backend port |
-| `VITE_API_URL` | `http://localhost:3000/api` | Frontend API base URL |
+| `VITE_API_URL` | `http://localhost:3001/api` | Frontend API base URL |
 
 Model architecture hyperparameters (also configurable via environment):
 
@@ -1037,6 +1071,18 @@ The system is evaluated on these metrics (computed by `MetricsTracker` in [ml/sr
 | **Value prediction MAE** | Mean absolute error of position evaluation | Minimize |
 
 Human move prediction has a theoretical accuracy ceiling around ~50% top-1 (humans are noisy decision-makers). The key quality metric is whether the predicted *distribution* matches the observed move distribution, measured by KL divergence across a test set.
+
+### Current Measured Results (2026-07-31, lean local training)
+
+Three Phase-1 bracket checkpoints, each trained 2 epochs over ~1M positions of eval-annotated 2025-06 Lichess blitz on an Apple M4 (MPS). Held-out numbers use games from a *different month* (2025-05):
+
+| Bracket | Val top-1 | Held-out masked top-1 | Held-out masked top-5 | Product-level sampled top-1 |
+|---------|-----------|----------------------|----------------------|-----------------------------|
+| 1000-1200 | 27.1% | 22.7% | 50.3% | 20.4% |
+| 1400-1600 | 26.9% | 25.5% | 51.8% | 22.8% |
+| 1800-2000 | 26.3% | 23.8% | 49.0% | 22.7% |
+
+"Masked" = argmax over legal moves (Maia-comparable). "Product-level sampled" = the full serving pipeline including temperature/nucleus sampling, measured by `scripts/eval_harness.py` — intentionally lower than argmax because the clone plays a *distribution*, not its single best guess. Blunder-head calibration is 0.83 (target >0.80). The rating-differentiation smoke test passes at all five levels (an 800 plays 10 different moves in the test position including typical lunges; a 2000+ locks onto the main line). More epochs/data move top-1 toward the >36% Phase-1 target — each additional epoch is one resumable command (see [USER_PROGRESS.md](USER_PROGRESS.md)).
 
 Behavioral tests also verify that:
 - Aggressive player profiles produce more captures and checks.

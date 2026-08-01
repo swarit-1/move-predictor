@@ -4,6 +4,30 @@
 > is work that requires a human decision, an external account, money, or
 > a long-running compute job. Items are in execution order.
 >
+> **STATUS UPDATE 2026-07-31: Phase B (lean training) is DONE — executed
+> locally on the M4 MacBook's GPU (MPS) overnight, $0 spent, no GPU rental
+> needed.** Three bracket checkpoints live in `ml/data/checkpoints/`
+> (1000-1200, 1400-1600, 1800-2000), predictions serve from the trained
+> model, and the §5.5 personalize endpoint is active and verified.
+> Measured quality: val top-1 ≈ 27% per bracket; cross-month held-out
+> masked top-1 22.7–25.5%. The 35% target needs more epochs/data — see
+> "Optional refinement" below. Phases A/B below are kept for reference;
+> only their unchecked decisions (A.5) still apply.
+>
+> **Optional refinement (whenever the laptop is idle):** each bracket
+> resumes cleanly for extra epochs, ~85 min per epoch per bracket:
+> ```bash
+> cd ml && python3 scripts/train.py --phase 1 \
+>   --data data/processed/train_1400_1600.h5 \
+>   --val-data data/processed/val_1400_1600.h5 \
+>   --checkpoint data/checkpoints/1400_1600/phase1_latest.pt \
+>   --epochs 2 --batch-size 256 \
+>   --checkpoint-dir data/checkpoints/1400_1600 --log-dir runs/1400_1600
+> ```
+> Expected: +3–5% top-1 from two more epochs (epoch 2 added +4.3%).
+> Free the GPU first: stop the ML service and Docker Desktop during
+> training (16 GB RAM is tight), and re-run the eval harness after.
+>
 > **Budget reality:** $50 of GPU credit, no 1.8 TB of disk. The original
 > PRD §5.4 plan (2.5 years × 9 brackets × 30k games) is rescoped below
 > into a "lean training" plan that fits the budget.
@@ -238,10 +262,16 @@ under 25% there's a bug; bisect by toggling `prediction_pipeline.has_checkpoint`
 and comparing to the explorer-fallback path.
 
 ### C.2 — Feature flag personalize in the UI
-Currently the `/api/players/{key}/personalize` endpoint is callable but
-no UI wires to it. After §5.4 lands, add a button in the opponent
-profile panel that triggers it. (Optional v1.5 work — a one-evening UI
-task. Not blocking the YC demo.)
+**DONE (2026-07-31), and better than a button:** personalize now runs
+automatically. Building a profile kicks off the Phase 3 fine-tune in the
+background (worker thread — live predictions stay responsive), and the
+in-game opponent badge shows the clone's fidelity stage live:
+**Generic → Repertoire → Personalized** (polls
+`GET /api/players/clone-status/:playerKey`). The trained-model path also
+now blends the player's position-keyed personal history
+(`PersonalExplorer`) into the policy logits, so the clone reproduces
+their actual choices in any position they've faced before — middlegames
+included, not just book lines.
 
 ---
 

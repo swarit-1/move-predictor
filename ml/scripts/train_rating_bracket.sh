@@ -3,20 +3,23 @@ set -e
 
 RATING_MIN=${1:-1400}
 RATING_MAX=${2:-1600}
-MONTH=${3:-2024-01}
-MAX_GAMES=${4:-50000}
+MONTH=${3:-2025-06}
+MAX_GAMES=${4:-16000}
+EPOCHS=${5:-2}
+BATCH_SIZE=${6:-256}
 
 echo "=== Training model for ${RATING_MIN}-${RATING_MAX} rated players ==="
 
-# Step 1: Download and filter games
+# Step 1: Download and filter games (fast text-streaming filter; keeps
+# only games with [%eval] annotations so training gets real error labels)
 echo "Step 1: Downloading games..."
-python3 scripts/download_lichess_data.py \
+python3 scripts/fast_download_corpus.py \
   --month "$MONTH" \
-  --rating-min "$RATING_MIN" \
-  --rating-max "$RATING_MAX" \
+  --brackets "${RATING_MIN}-${RATING_MAX}" \
   --max-games "$MAX_GAMES"
 
-# Step 2: Preprocess into HDF5
+# Step 2: Preprocess into HDF5 (parallel; parses [%eval] into
+# eval/CPL/blunder labels)
 echo "Step 2: Preprocessing..."
 python3 scripts/preprocess_corpus.py \
   "data/raw/lichess_${MONTH}_${RATING_MIN}-${RATING_MAX}.pgn" \
@@ -29,9 +32,10 @@ python3 scripts/train.py \
   --phase 1 \
   --data "data/processed/train_${RATING_MIN}_${RATING_MAX}.h5" \
   --val-data "data/processed/val_${RATING_MIN}_${RATING_MAX}.h5" \
-  --epochs 10 \
-  --batch-size 512 \
-  --checkpoint-dir "data/checkpoints/${RATING_MIN}_${RATING_MAX}"
+  --epochs "$EPOCHS" \
+  --batch-size "$BATCH_SIZE" \
+  --checkpoint-dir "data/checkpoints/${RATING_MIN}_${RATING_MAX}" \
+  --log-dir "runs/${RATING_MIN}_${RATING_MAX}"
 
 echo "=== Training complete ==="
 echo "Checkpoint saved to data/checkpoints/${RATING_MIN}_${RATING_MAX}/"

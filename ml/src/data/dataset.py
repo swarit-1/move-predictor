@@ -40,12 +40,13 @@ class ChessPositionDataset(Dataset):
 
         self._data = data
         self._hdf5_path = hdf5_path
+        # Opened lazily per process: h5py handles can't be pickled, and
+        # macOS DataLoader workers are spawned (the dataset is pickled).
         self._hdf5_file = None
 
         if hdf5_path:
-            # Open in read mode, keep handle for __getitem__
-            self._hdf5_file = h5py.File(hdf5_path, "r")
-            self._length = self._hdf5_file["board_tensor"].shape[0]
+            with h5py.File(hdf5_path, "r") as f:
+                self._length = f["board_tensor"].shape[0]
         elif data:
             self._length = len(data)
         else:
@@ -57,10 +58,17 @@ class ChessPositionDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         if self._data is not None:
             return self._get_from_memory(idx)
-        elif self._hdf5_file is not None:
+        elif self._hdf5_path is not None:
+            if self._hdf5_file is None:
+                self._hdf5_file = h5py.File(self._hdf5_path, "r")
             return self._get_from_hdf5(idx)
         else:
             raise RuntimeError("Dataset is empty")
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_hdf5_file"] = None  # reopened lazily in the worker process
+        return state
 
     def _get_from_memory(self, idx: int) -> dict[str, torch.Tensor]:
         item = self._data[idx]
@@ -139,13 +147,15 @@ def create_dataloaders(
         train_ds = ChessPositionDataset(data=train_data)
         val_ds = ChessPositionDataset(data=val_data)
 
+    pin = torch.cuda.is_available()  # pin_memory is CUDA-only
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin,
         drop_last=True,
+        persistent_workers=num_workers > 0,
     )
 
     val_loader = DataLoader(
@@ -153,7 +163,8 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin,
+        persistent_workers=num_workers > 0,
     )
 
     return train_loader, val_loader
@@ -172,34 +183,30 @@ def save_to_hdf5(data: list[dict], filepath: str):
 
     Path(filepath).parent.mkdir(parents=True, exist_ok=True)
 
+    # Stack into contiguous arrays first — vectorized writes are orders of
+    # magnitude faster than per-row HDF5 assignment.
+    def _stats_vec(item: dict) -> np.ndarray:
+        stats = item.get("player_stats", np.zeros(settings.num_player_stats))
+        if len(stats) < settings.num_player_stats:
+            padded = np.zeros(settings.num_player_stats, dtype=np.float32)
+            padded[: len(stats)] = stats
+            stats = padded
+        return np.asarray(stats, dtype=np.float32)
+
+    arrays = {
+        "board_tensor": np.stack([item["board_tensor"] for item in data]).astype("float32"),
+        "move_history": np.stack([item["move_history"] for item in data]).astype("int64"),
+        "player_id": np.array([item.get("player_id", 0) for item in data], dtype="int64"),
+        "player_stats": np.stack([_stats_vec(item) for item in data]),
+        "game_phase": np.array([item.get("game_phase", 1) for item in data], dtype="int64"),
+        "time_control": np.array([item.get("time_control", 0) for item in data], dtype="int64"),
+        "move_index": np.array([item["move_index"] for item in data], dtype="int64"),
+        "eval_score": np.array([item.get("eval_score", 0.0) for item in data], dtype="float32"),
+        "centipawn_loss": np.array(
+            [item.get("centipawn_loss", 0.0) for item in data], dtype="float32"
+        ),
+        "is_blunder": np.array([item.get("is_blunder", 0.0) for item in data], dtype="float32"),
+    }
     with h5py.File(filepath, "w") as f:
-        # Pre-allocate datasets
-        f.create_dataset("board_tensor", shape=(n, 18, 8, 8), dtype="float32")
-        f.create_dataset("move_history", shape=(n, settings.history_length), dtype="int64")
-        f.create_dataset("player_id", shape=(n,), dtype="int64")
-        f.create_dataset("player_stats", shape=(n, settings.num_player_stats), dtype="float32")
-        f.create_dataset("game_phase", shape=(n,), dtype="int64")
-        f.create_dataset("time_control", shape=(n,), dtype="int64")
-        f.create_dataset("move_index", shape=(n,), dtype="int64")
-        f.create_dataset("eval_score", shape=(n,), dtype="float32")
-        f.create_dataset("centipawn_loss", shape=(n,), dtype="float32")
-        f.create_dataset("is_blunder", shape=(n,), dtype="float32")
-
-        for i, item in enumerate(data):
-            f["board_tensor"][i] = item["board_tensor"]
-            f["move_history"][i] = item["move_history"]
-            f["player_id"][i] = item.get("player_id", 0)
-
-            stats = item.get("player_stats", np.zeros(settings.num_player_stats))
-            if len(stats) < settings.num_player_stats:
-                padded = np.zeros(settings.num_player_stats, dtype=np.float32)
-                padded[:len(stats)] = stats
-                stats = padded
-            f["player_stats"][i] = stats
-
-            f["game_phase"][i] = item.get("game_phase", 1)
-            f["time_control"][i] = item.get("time_control", 0)
-            f["move_index"][i] = item["move_index"]
-            f["eval_score"][i] = item.get("eval_score", 0.0)
-            f["centipawn_loss"][i] = item.get("centipawn_loss", 0.0)
-            f["is_blunder"][i] = item.get("is_blunder", 0.0)
+        for name, arr in arrays.items():
+            f.create_dataset(name, data=arr)

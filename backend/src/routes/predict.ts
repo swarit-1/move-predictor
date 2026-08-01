@@ -59,6 +59,9 @@ const predictSchema = z.object({
   move_history: z.array(z.string()).optional().default([]),
   player_id: z.number().int().optional().default(0),
   player_rating: z.number().min(0).max(4000).optional().default(1500),
+  // Which site's scale player_rating is on; the ML service translates
+  // chesscom ratings to its internal Lichess-denominated scale.
+  rating_pool: z.enum(["lichess", "chesscom"]).optional(),
   player_key: z.string().optional(),
   // PRD §5.2: 10-dim style profile. All fields optional (clients sending
   // only the original 3 keep working; the ML side defaults the rest to 50).
@@ -112,6 +115,7 @@ predictRouter.post("/", async (req: Request, res: Response) => {
       move_history: params.move_history,
       player_id: params.player_id,
       player_rating: params.player_rating,
+      rating_pool: params.rating_pool,
       player_key: params.player_key,
       style_overrides: params.style_overrides,
       time_remaining: params.time_remaining,

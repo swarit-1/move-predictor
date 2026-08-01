@@ -24,7 +24,6 @@ import argparse
 import asyncio
 import json
 import sys
-from io import StringIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -34,7 +33,6 @@ import chess.pgn
 import numpy as np
 
 from src.inference.pipeline import prediction_pipeline
-from src.models.move_encoding import encode_move
 
 
 def parse_args():
@@ -53,7 +51,7 @@ def parse_args():
 async def evaluate(args):
     # Load model
     if args.checkpoint:
-        prediction_pipeline.load_model(args.checkpoint)
+        prediction_pipeline.load_model(args.checkpoint, pin=True)
     else:
         prediction_pipeline.load_model()
 
