@@ -4,7 +4,7 @@ import { Avatar } from "./Avatar";
 
 interface AppHeaderProps {
   currentPhase: string;
-  onNavigate: (target: "welcome" | "history" | "auth") => void;
+  onNavigate: (target: "welcome" | "history" | "auth" | "account") => void;
 }
 
 export function AppHeader({ currentPhase, onNavigate }: AppHeaderProps) {
@@ -69,6 +69,15 @@ export function AppHeader({ currentPhase, onNavigate }: AppHeaderProps) {
                     className="w-full text-left px-4 py-2.5 text-[13px] text-paper hover:bg-walnut-700"
                   >
                     My Games
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNavigate("account");
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-[13px] text-paper hover:bg-walnut-700"
+                  >
+                    Account &amp; Security
                   </button>
                   <button
                     onClick={() => {

@@ -35,6 +35,64 @@ export async function fetchMe() {
   return data;
 }
 
+// PLAN.md §6.1: email verification.
+export async function verifyEmail(token: string) {
+  const { data } = await api.post("/auth/verify-email", { token });
+  return data;
+}
+export async function resendVerification() {
+  const { data } = await api.post("/auth/resend-verification");
+  return data;
+}
+
+// PLAN.md §6.1: password reset. forgot-password always returns 200
+// (anti-enumeration) — the UI must not imply the email exists.
+export async function forgotPassword(email: string) {
+  const { data } = await api.post("/auth/forgot-password", { email });
+  return data;
+}
+export async function resetPassword(token: string, password: string) {
+  const { data } = await api.post("/auth/reset-password", { token, password });
+  return data;
+}
+
+// PLAN.md §6.1: TOTP two-factor. `code` is a 6-digit TOTP or a recovery code.
+export async function twoFaVerify(pendingToken: string, code: string) {
+  const { data } = await api.post("/auth/2fa/verify", {
+    pending_token: pendingToken,
+    code,
+  });
+  return data;
+}
+export async function twoFaSetup(password: string) {
+  const { data } = await api.post("/auth/2fa/setup", { password });
+  return data;
+}
+export async function twoFaEnable(code: string) {
+  const { data } = await api.post("/auth/2fa/enable", { code });
+  return data;
+}
+export async function twoFaDisable(password: string, code: string) {
+  const { data } = await api.post("/auth/2fa/disable", { password, code });
+  return data;
+}
+
+// PLAN.md §6.1: session & account management. logout-all / delete-account
+// bump tokenVersion server-side, which also revokes the CURRENT token —
+// callers must locally log out afterwards.
+export async function logoutAll() {
+  const { data } = await api.post("/auth/logout-all");
+  return data;
+}
+export async function deleteAccount(password: string) {
+  const { data } = await api.post("/auth/delete-account", { password });
+  return data;
+}
+export async function exportData(): Promise<Blob> {
+  const { data } = await api.get("/auth/export", { responseType: "blob" });
+  return data as Blob;
+}
+
 // PRD §5.6: link / unlink a Lichess / Chess.com identity to the user.
 export async function linkChessAccount(
   source: "lichess" | "chesscom",

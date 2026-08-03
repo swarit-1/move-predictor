@@ -6,6 +6,9 @@ import { ReplayScreen } from "./components/Replay/ReplayScreen";
 import { PracticeScreen } from "./components/Practice/PracticeScreen";
 import { ReviewScreen } from "./components/Review/ReviewScreen";
 import { AuthScreen } from "./components/Auth/AuthScreen";
+import { VerifyEmailScreen } from "./components/Auth/VerifyEmailScreen";
+import { ResetPasswordScreen } from "./components/Auth/ResetPasswordScreen";
+import { AccountScreen } from "./components/Auth/AccountScreen";
 import { HistoryScreen } from "./components/History/HistoryScreen";
 import { CoachScreen } from "./components/Coach/CoachScreen";
 import { AppHeader } from "./components/common/AppHeader";
@@ -25,10 +28,44 @@ type AppPhase =
   | "review"
   | "auth"
   | "history"
-  | "coach";
+  | "coach"
+  | "account"
+  | "verify-email"
+  | "reset-password";
+
+// PLAN.md §6.1: the app is an SPA with no router, but the verification and
+// reset emails link to /verify-email?token=… and /reset-password?token=…
+// (both fall through to index.html via the vite dev server / nginx
+// try_files). Read the landing intent exactly once at module load, then
+// scrub the token from the URL so it never lingers in the address bar or
+// browser history.
+interface AuthLanding {
+  flow: "verify-email" | "reset-password";
+  token: string;
+}
+
+function readAuthLanding(): AuthLanding | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+  if (!token) return null;
+  const path = window.location.pathname.replace(/\/+$/, "");
+  const flowParam = params.get("flow");
+  let flow: AuthLanding["flow"] | null = null;
+  if (path.endsWith("/verify-email") || flowParam === "verify-email") {
+    flow = "verify-email";
+  } else if (path.endsWith("/reset-password") || flowParam === "reset-password") {
+    flow = "reset-password";
+  }
+  if (!flow) return null;
+  window.history.replaceState({}, "", "/");
+  return { flow, token };
+}
+
+const authLanding = readAuthLanding();
 
 export default function App() {
-  const [phase, setPhase] = useState<AppPhase>("welcome");
+  const [phase, setPhase] = useState<AppPhase>(authLanding?.flow ?? "welcome");
   const [postAuthPhase, setPostAuthPhase] = useState<AppPhase | null>(null);
 
   const resetGame = useGameStore((s) => s.resetGame);
@@ -73,6 +110,15 @@ export default function App() {
     setPostAuthPhase(null);
     setPhase("auth");
   }, []);
+  // PLAN.md §6.1: account & security panel — sign-in required.
+  const handleAccount = useCallback(() => {
+    if (!user) {
+      setPostAuthPhase("account");
+      setPhase("auth");
+    } else {
+      setPhase("account");
+    }
+  }, [user]);
 
   const handleStart = useCallback(() => {
     resetGame();
@@ -177,15 +223,20 @@ export default function App() {
   }, [postAuthPhase]);
 
   const handleNavigate = useCallback(
-    (target: "welcome" | "history" | "auth") => {
+    (target: "welcome" | "history" | "auth" | "account") => {
       if (target === "history") return handleHistory();
       if (target === "auth") return handleAuth();
+      if (target === "account") return handleAccount();
       setPhase("welcome");
     },
-    [handleHistory, handleAuth]
+    [handleHistory, handleAuth, handleAccount]
   );
 
-  const showHeader = phase !== "welcome" && phase !== "auth";
+  const showHeader =
+    phase !== "welcome" &&
+    phase !== "auth" &&
+    phase !== "verify-email" &&
+    phase !== "reset-password";
 
   let content: React.ReactNode;
   if (phase === "welcome") {
@@ -198,6 +249,29 @@ export default function App() {
         onAuth={handleAuth}
         onPlayYourself={handlePlayYourself}
         onCoach={handleCoach}
+        onAccount={handleAccount}
+      />
+    );
+  } else if (phase === "verify-email") {
+    content = (
+      <VerifyEmailScreen
+        token={authLanding?.token ?? ""}
+        onContinue={handleBackToWelcome}
+      />
+    );
+  } else if (phase === "reset-password") {
+    content = (
+      <ResetPasswordScreen
+        token={authLanding?.token ?? ""}
+        onDone={handleAuth}
+        onCancel={handleBackToWelcome}
+      />
+    );
+  } else if (phase === "account") {
+    content = (
+      <AccountScreen
+        onBack={handleBackToWelcome}
+        onSignedOut={handleBackToWelcome}
       />
     );
   } else if (phase === "setup") {

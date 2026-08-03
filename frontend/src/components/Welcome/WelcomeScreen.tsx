@@ -13,6 +13,8 @@ interface Props {
   onPlayYourself?: () => void;
   // PRD §5.9: coach mode.
   onCoach?: () => void;
+  // PLAN.md §6.1: account & security panel.
+  onAccount?: () => void;
 }
 
 interface ModeRow {
@@ -32,6 +34,7 @@ export function WelcomeScreen({
   onAuth,
   onPlayYourself,
   onCoach,
+  onAccount,
 }: Props) {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
