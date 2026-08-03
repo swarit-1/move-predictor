@@ -24,7 +24,51 @@ model User {
   linkedChessSource   String? // "lichess" | "chesscom"
   linkedChessUsername String?
 
+  // PLAN.md §6 — account security
+  emailVerifiedAt DateTime?
+  role            String    @default("user") // "user" | "admin"
+  // Incremented to revoke every outstanding JWT ("log out everywhere",
+  // forced on password reset / 2FA disable).
+  tokenVersion    Int       @default(0)
+  // TOTP 2FA: secret stored once setup starts; enabled only after the
+  // user proves possession with a valid code.
+  totpSecret      String?
+  totpEnabledAt   DateTime?
+  // Soft-delete: hidden immediately, purged after 14 days (PLAN.md §6.1)
+  deletedAt       DateTime?
+
+  emailTokens   EmailToken[]
+  recoveryCodes RecoveryCode[]
+
   @@map("app_users")
+}
+
+// Single-use tokens for email verification and password reset. Only the
+// SHA-256 hash is stored; the raw token goes in the emailed link.
+model EmailToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   String // "verify" | "reset"
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+  @@map("app_email_tokens")
+}
+
+// 2FA recovery codes — hashed at rest, single-use.
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@index([userId])
+  @@map("app_recovery_codes")
 }
 
 model SavedGame {
