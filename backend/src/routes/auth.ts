@@ -385,14 +385,20 @@ authRouter.post("/forgot-password", async (req: Request, res: Response) => {
   // Always 200 — never reveal whether the email exists.
   res.json({ success: true, data: { sent: true } });
   if (!email) return;
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || user.deletedAt) return;
-  const raw = await createEmailToken(user.id, "reset", RESET_TTL_MS);
-  await sendMail({
-    to: user.email,
-    subject: "Reset your Move Predictor password",
-    text: `Reset your password within 30 minutes:\n\n${APP_URL}/reset-password?token=${raw}\n\nIf you didn't request this, ignore it — your password is unchanged.`,
-  });
+  // Post-response work MUST be exception-safe: an unhandled rejection
+  // here would crash the process (and leaks timing anyway).
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || user.deletedAt) return;
+    const raw = await createEmailToken(user.id, "reset", RESET_TTL_MS);
+    await sendMail({
+      to: user.email,
+      subject: "Reset your Move Predictor password",
+      text: `Reset your password within 30 minutes:\n\n${APP_URL}/reset-password?token=${raw}\n\nIf you didn't request this, ignore it — your password is unchanged.`,
+    });
+  } catch (error: any) {
+    logger.error("forgot-password background work failed", { error: error.message });
+  }
 });
 
 const resetSchema = z.object({

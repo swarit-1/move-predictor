@@ -37,6 +37,8 @@ export function createApp() {
       max,
       standardHeaders: true,
       legacyHeaders: false,
+      // Tests hammer endpoints deliberately; limits stay on everywhere else.
+      skip: () => process.env.NODE_ENV === "test",
       message: { success: false, error: "Too many requests, please slow down" },
     });
   // Expensive: profile builds, personalize, review, coach
