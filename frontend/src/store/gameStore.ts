@@ -20,6 +20,9 @@ export interface PredictionData {
     deviation_reason: string;
     factors: string[];
   } | null;
+  // PLAN.md §1.3/§1.4 — modeled by the ML service
+  thinkTimeMs?: number | null;
+  suggestedAction?: "resign" | "offer_draw" | null;
 }
 
 export interface PositionEval {
@@ -40,7 +43,10 @@ export type GameOverReason =
   | "draw_insufficient"
   | "draw_50_move"
   | "flag_player"
-  | "flag_opponent";
+  | "flag_opponent"
+  | "resign_opponent"
+  | "resign_player"
+  | "draw_agreed";
 
 export interface GameOverInfo {
   reason: GameOverReason;
@@ -114,6 +120,7 @@ interface GameState {
   tickClock: (side: "player" | "opponent", elapsed: number) => void;
   addIncrement: (side: "player" | "opponent") => void;
   onFlag: (side: "player" | "opponent") => void;
+  declareGameOver: (info: GameOverInfo) => void;
   /** Rebuild the live `chess` instance from the persisted PGN. Called on
    * rehydrate; safe to call manually too. */
   rehydrateChessFromPgn: () => void;
@@ -374,6 +381,13 @@ export const useGameStore = create<GameState>()(
         premove: null,
       });
     }
+  },
+
+  // PLAN.md §1.4: generic terminal-state setter (resignations, agreed
+  // draws — anything chess.js itself doesn't detect).
+  declareGameOver: (info) => {
+    if (get().flagGameOver) return;
+    set({ flagGameOver: info });
   },
 
   onFlag: (flaggedSide) => {

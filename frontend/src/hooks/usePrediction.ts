@@ -105,6 +105,8 @@ export function usePrediction() {
           engineBest: data.engine_best,
           engineTopMoves: data.engine_top_moves,
           explanation: data.explanation,
+          thinkTimeMs: data.think_time_ms ?? null,
+          suggestedAction: data.suggested_action ?? null,
         };
         setPrediction(pred);
         setPredictionError(null);

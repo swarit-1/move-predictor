@@ -96,13 +96,13 @@ This is the feature we market. It must be flawless before anything else ships.
 Humans don't move in constant time. We already have `[%clk]` data in every
 training game — use it.
 
-- [ ] Train a tiny think-time head (or a lookup model: position complexity ×
+- [x] Think-time model shipped 2026-08-03 (`ml/src/inference/think_time.py`, heuristic v1 — complexity/book/recapture/time-pressure aware, served as `think_time_ms`; learned head from [%clk] data still open). Original: (or a lookup model: position complexity ×
       phase × time-remaining → sampled think time). Data is already in the
       corpus PGNs.
-- [ ] Blitz clone snaps out book moves in <1 s, tanks 15–40 s on sharp
+- [x] Blitz clone snaps out book moves in <1 s, tanks 15–40 s on sharp
       middlegame decisions, speeds up in time trouble (and errs more — the
       time_pressure path already exists).
-- [ ] Premove-like instant recaptures on forced sequences.
+- [x] Premove-like instant recaptures on forced sequences.
 
 ### 1.4 Endgame + game-end behavior
 
@@ -112,10 +112,10 @@ Nothing breaks immersion like a clone that shuffles pieces in K+Q vs K.
       tablebase-best line but at rating-scaled accuracy (a 1200 clone should
       still botch some K+P endings — sample from tablebase-win-preserving
       moves with rating-scaled noise; a 2000 clone converts cleanly).
-- [ ] Resignation model: humans resign lost positions. Resign when eval < -6
+- [x] Resignation model (shipped: rating-scaled, deep-loss gated, ends game in web UI + simulate API): humans resign lost positions. Resign when eval < -6
       for N consecutive moves, with probability scaled by rating and rated by
       the player's actual resignation habits (derivable from their games).
-- [ ] Draw offers/acceptance modeled the same way.
+- [x] Draw offers/acceptance modeled the same way (offer banner with accept/decline in web UI).
 - [ ] Fifty-move/threefold awareness: never let the clone accidentally draw a
       completely winning position (this reads as a bug, not as human).
 

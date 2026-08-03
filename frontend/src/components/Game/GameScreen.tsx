@@ -38,12 +38,15 @@ export function GameScreen({ onBack, onReview, onSave }: Props) {
   const opponentTimeLeft = useGameStore((s) => s.opponentTimeLeft);
   const addIncrement = useGameStore((s) => s.addIncrement);
   const flagGameOver = useGameStore((s) => s.flagGameOver);
+  const declareGameOver = useGameStore((s) => s.declareGameOver);
   const opponent = usePlayerStore((s) => s.opponent);
   const { fetchPrediction, predictionError, retryPrediction } = usePrediction();
   const prevMoveCountRef = useRef(moveHistory.length);
   const hasTriggeredFirstMove = useRef(false);
   const [showStylePanel, setShowStylePanel] = useState(false);
   const [showEvalGraph, setShowEvalGraph] = useState(false);
+  // PLAN.md §1.4: pending draw offer from the clone
+  const [drawOffered, setDrawOffered] = useState(false);
   // Ref so think-time effect can read current time without re-running on every tick
   const opponentTimeLeftRef = useRef(opponentTimeLeft);
   useEffect(() => { opponentTimeLeftRef.current = opponentTimeLeft; }, [opponentTimeLeft]);
@@ -86,47 +89,56 @@ export function GameScreen({ onBack, onReview, onSave }: Props) {
       const currentTurn = chess.turn();
       const isOpponentTurn = currentTurn !== playerColor;
       if (isOpponentTurn) {
-        // Compute realistic think time based on position complexity,
-        // rating, game phase, time control, and remaining time.
-        const numMoves = moveHistory.length;
-        const legalMoves = chess.moves().length;
-        const opponentRating = opponent?.rating ?? 1500;
         const timeLeft = opponentTimeLeftRef.current; // stable ref, not reactive
 
-        // Base time: 1-8 seconds depending on number of legal moves
-        let delay = 1000 + (legalMoves / 40) * 3000;
-
-        // Game phase: opening moves are faster (theory), endgame slightly faster
-        if (numMoves < 20) {
-          delay *= 0.4; // Opening — theory
-        } else if (numMoves > 60) {
-          delay *= 0.7; // Endgame
+        // PLAN.md §1.3: prefer the ML-modeled think time (complexity,
+        // book hits, recaptures, time pressure — modeled server-side).
+        let delay: number;
+        if (prediction.thinkTimeMs != null) {
+          delay = prediction.thinkTimeMs;
+        } else {
+          // Fallback heuristic (ML service predates think-time modeling)
+          const numMoves = moveHistory.length;
+          const legalMoves = chess.moves().length;
+          const opponentRating = opponent?.rating ?? 1500;
+          delay = 1000 + (legalMoves / 40) * 3000;
+          if (numMoves < 20) delay *= 0.4;
+          else if (numMoves > 60) delay *= 0.7;
+          delay *= 0.7 + opponentRating / 4000;
+          if (timeControl && timeControl.initial > 0) {
+            const tcFactor = Math.min(1.5, Math.max(0.3, timeControl.initial / 600));
+            delay *= tcFactor;
+          }
+          delay *= 0.7 + Math.random() * 0.6;
         }
 
-        // Rating: higher rated = slightly longer (more careful)
-        delay *= (0.7 + opponentRating / 4000);
-
-        // Time control scaling
+        // Live-clock safety overrides (the server modeled with the clock at
+        // request time; the clock has kept ticking since).
         if (timeControl && timeControl.initial > 0) {
-          // Bullet = faster, classical = slower
-          const tcFactor = Math.min(1.5, Math.max(0.3, timeControl.initial / 600));
-          delay *= tcFactor;
-
-          // Time pressure: speed up significantly when low
           if (timeLeft < 10) delay = Math.min(delay, 150 + Math.random() * 250);
           else if (timeLeft < 30) delay = Math.min(delay, 400 + Math.random() * 600);
-          else if (timeLeft < 60) delay *= 0.5;
         }
+        delay = Math.max(200, Math.min(delay, 30000));
 
-        // Random jitter ±30%
-        delay *= (0.7 + Math.random() * 0.6);
-
-        // Clamp to reasonable range
-        delay = Math.max(400, Math.min(12000, delay));
+        // PLAN.md §1.4: the clone resigns hopeless positions after a
+        // human-scale pause instead of shuffling to mate.
+        if (prediction.suggestedAction === "resign") {
+          const timer = setTimeout(() => {
+            declareGameOver({
+              reason: "resign_opponent",
+              winner: "player",
+              description: `${opponent?.username ?? "Opponent"} resigned`,
+            });
+          }, Math.min(delay, 4000));
+          return () => clearTimeout(timer);
+        }
 
         const timer = setTimeout(() => {
           applyPredictedMove(prediction.move);
           if (timeControl) addIncrement("opponent");
+          if (prediction.suggestedAction === "offer_draw") {
+            setDrawOffered(true);
+          }
         }, delay);
         return () => clearTimeout(timer);
       }
@@ -272,6 +284,37 @@ export function GameScreen({ onBack, onReview, onSave }: Props) {
             >
               Retry
             </button>
+          </div>
+        </div>
+      )}
+
+      {drawOffered && !flagGameOver && (
+        <div className="bg-sky-500/[0.05] border-b border-sky-500/[0.1] flex-shrink-0 animate-slide-up">
+          <div className="max-w-[1360px] mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between">
+            <p className="text-xs text-sky-300/90 font-light">
+              {opponent?.username ?? "Opponent"} offers a draw
+            </p>
+            <div className="flex gap-3 ml-4">
+              <button
+                onClick={() => {
+                  setDrawOffered(false);
+                  declareGameOver({
+                    reason: "draw_agreed",
+                    winner: "draw",
+                    description: "Draw agreed",
+                  });
+                }}
+                className="text-xs text-sky-300 hover:text-sky-200 font-medium transition-colors duration-200"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => setDrawOffered(false)}
+                className="text-xs text-zinc-500 hover:text-zinc-300 font-medium transition-colors duration-200"
+              >
+                Decline
+              </button>
+            </div>
           </div>
         </div>
       )}

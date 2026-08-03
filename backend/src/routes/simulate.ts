@@ -259,6 +259,26 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
         time_control_initial: timeControlInitial,
       });
 
+      // PLAN.md §1.4: the clone resigns hopeless positions.
+      if (prediction.suggested_action === "resign") {
+        session.gameOver = true;
+        session.gameOverReason = "resignation";
+        session.winner = isWhiteTurn ? "black" : "white";
+        res.json({
+          success: true,
+          data: {
+            game_over: true,
+            result: "resignation",
+            winner: session.winner,
+            fen: session.chess.fen(),
+            pgn: session.chess.pgn(),
+            white_time: session.whiteTimeRemaining,
+            black_time: session.blackTimeRemaining,
+          },
+        });
+        return;
+      }
+
       // Apply the predicted move (defensive: treat an unplayable
       // prediction as "no AI move" rather than a 500)
       let aiResult;
@@ -282,6 +302,8 @@ simulateRouter.post("/:sessionId/move", async (req: Request, res: Response) => {
         aiMove = {
           move: prediction.move,
           probability: prediction.probability,
+          think_time_ms: prediction.think_time_ms,
+          suggested_action: prediction.suggested_action,
           top_moves: prediction.top_moves,
           engine_best: prediction.engine_best,
           blunder_probability: prediction.blunder_probability,

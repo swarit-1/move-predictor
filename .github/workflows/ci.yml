@@ -41,6 +41,22 @@ jobs:
       run:
         working-directory: backend
 
+    # The auth-journey suite exercises real Prisma queries.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +70,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
         env:
-          # prisma generate (postinstall) needs the schema only, not a live DB
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
 
       - name: Type check
@@ -62,6 +77,11 @@ jobs:
 
       - name: Build
         run: npx tsc
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
 
       - name: Test
         run: npm test

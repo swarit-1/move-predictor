@@ -32,6 +32,12 @@ class PredictResponse(BaseModel):
     engine_best: str | None = None
     engine_top_moves: list[dict] = []
     explanation: dict | None = None
+    # PLAN.md §1.3: modeled human think time for this move (clients render
+    # this instead of inventing their own delay).
+    think_time_ms: int | None = None
+    # PLAN.md §1.4: "resign" | "offer_draw" | None for the side that just
+    # got a move sampled.
+    suggested_action: str | None = None
 
 
 @router.post("/predict")
@@ -146,6 +152,27 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             "factors": expl.factors,
         }
 
+    # Modeled human timing + game-end behavior (PLAN.md §1.3/§1.4)
+    from src.inference.think_time import sample_think_time_ms, suggest_game_end
+
+    think_time_ms = sample_think_time_ms(
+        board,
+        result.move,
+        player_rating=internal_rating,
+        time_control_initial=request.time_control_initial,
+        time_remaining=request.time_remaining,
+        from_book=result.from_book,
+        predicted_cpl=result.predicted_cpl,
+    )
+    eval_cp_mover = None
+    if engine_top_moves:
+        cp = engine_top_moves[0].get("cp")
+        if cp is not None:
+            eval_cp_mover = float(cp)
+    suggested_action = suggest_game_end(
+        board, eval_cp_mover=eval_cp_mover, player_rating=internal_rating
+    )
+
     return PredictResponse(
         move=result.move_uci,
         probability=result.probability,
@@ -156,4 +183,6 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
         engine_best=engine_best,
         engine_top_moves=engine_top_moves,
         explanation=explanation,
+        think_time_ms=think_time_ms,
+        suggested_action=suggested_action,
     )

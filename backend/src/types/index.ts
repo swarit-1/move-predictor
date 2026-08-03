@@ -19,6 +19,9 @@ export interface PredictionResult {
   engine_best: string | null;
   engine_top_moves: EngineMove[];
   explanation: MoveExplanation | null;
+  // PLAN.md §1.3/§1.4 — modeled by the ML service
+  think_time_ms?: number | null;
+  suggested_action?: "resign" | "offer_draw" | null;
 }
 
 export interface TopMove {
