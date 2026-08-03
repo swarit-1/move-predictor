@@ -127,11 +127,11 @@ Every point of top-1 accuracy makes the whole product better. Ordered by
 expected accuracy-per-effort:
 
 ### Phase M1 — Squeeze the current recipe (1 week, no architecture change)
-- [ ] **More epochs**: resume all three brackets +2–4 epochs (epoch 2 added
+- [x] **More epochs** (M1 pipeline in flight): resume all three brackets +2–4 epochs (epoch 2 added
       +4.3 pts; expect +3–5 more). Overnight jobs, already scripted.
 - [ ] **More data**: 48k → 150k games/bracket (downloads are ~2 min per
       bracket; preprocessing ~30 min; disk ~45 GB — prune after).
-- [ ] **Fill remaining brackets**: 400-800, 800-1000, 1200-1400, 1600-1800,
+- [x] **Fill remaining brackets** (M1 pipeline in flight): 400-800, 800-1000, 1200-1400, 1600-1800,
       2000-2200, 2200-2500 so nearest-bracket fallback is never > 100 Elo off.
 - [ ] Expected landing: **top-1 30–34%** cross-month.
 
@@ -171,7 +171,7 @@ expected accuracy-per-effort:
 ## 3. Optimizations to Current Features
 
 ### 3.1 Inference & serving performance
-- [ ] **Export to ONNX Runtime (CPU)**: the 48 M-param model at batch 1 should
+- [x] **Export to ONNX Runtime (CPU)** — DONE 2026-08-03 (`ml/scripts/export_onnx.py`, parity 2e-5; M4 batch-1: torch-CPU 6.8 ms / ORT fp32 7.4 ms on 2 threads; int8 48 MB but slower on ARM — use fp32 until memory-bound). Original note: the 48 M-param model at batch 1 should
       run ≤ 60 ms on 2 vCPUs quantized (int8). This removes the GPU
       requirement for production entirely and is the single biggest
       cost/latency lever. Benchmark torch-CPU vs ONNX vs ONNX-int8.
@@ -264,19 +264,19 @@ opening encyclopedias (commodity), general social network features.
 ### 5.1 Chess-domain edge cases (unit/property tests, ML + backend)
 The board is where weird lives. Exhaustive list to encode as tests:
 
-- [ ] Promotions: all 4 pieces × capture/non-capture × discovered check;
+- [x] Promotions: all 4 pieces × capture/non-capture × discovered check;
       underpromotion to knight delivering mate.
-- [ ] En passant: legality window (only immediately after), en passant that
+- [x] En passant: legality window (only immediately after), en passant that
       *resolves* check, en passant pinned-pawn illegality.
-- [ ] Castling: all rights permutations; castling through/into/out of check
+- [x] Castling: all rights permutations; castling through/into/out of check
       rejected; rights lost by rook capture *at* the rook square.
-- [ ] Draw states: stalemate, threefold (incl. rights/en-passant nuances in
+- [x] Draw states: stalemate, threefold (incl. rights/en-passant nuances in
       repetition detection), fifty-move, insufficient material (K vs K, KB vs
       K, KN vs K, KB vs KB same color).
 - [ ] Clone never plays into avoidable stalemate when completely winning;
       never misses mate-in-1 above 1600 (behavioral tests over 500 sampled
       positions per bracket — extend the existing sampler test suite).
-- [ ] FEN fuzzing: property-test the validators (backend `isValidFen` and ML
+- [x] FEN fuzzing (ml edge suite + backend fen-fuzz; CAUGHT REAL BUG: rank-7→8 non-pawn moves unencodable — fixed via shared-slot semantics): property-test the validators (backend `isValidFen` and ML
       `chess.Board(fen)`) with hypothesis/fast-check — malformed, unicode,
       1 MB strings, valid-but-absurd positions (9 queens), side-not-to-move
       in check.
@@ -327,15 +327,15 @@ Current: JWT with `dev-only-insecure-secret-do-not-use-in-prod` fallback,
 bcrypt hashing exists, no verification/reset/2FA. Target flow:
 
 ### 6.1 Core flows
-- [ ] **Signup**: email + password (zxcvbn strength meter, HIBP breach check)
+- [x] **Signup** (verification links live; zxcvbn/HIBP open): email + password (zxcvbn strength meter, HIBP breach check)
       → verification email (signed, 24 h expiry) → unverified accounts can
       play but not save/personalize (don't block the magic moment).
-- [ ] **Login**: rate-limited (5 fails → exponential backoff + captcha at 10;
+- [x] **Login** (done incl. anti-enumeration + dummy-hash timing): rate-limited (5 fails → exponential backoff + captcha at 10;
       per-account *and* per-IP), generic error messages (no user enumeration
       — same response for wrong-user and wrong-password).
-- [ ] **Password reset**: single-use token, 30 min expiry, invalidates all
+- [x] **Password reset** (done): single-use token, 30 min expiry, invalidates all
       sessions on success, notification email on change.
-- [ ] **2FA (TOTP)**: authenticator-app enrollment with QR + manual key,
+- [x] **2FA (TOTP)** (done; WebAuthn open): authenticator-app enrollment with QR + manual key,
       10 single-use recovery codes (shown once, hashed at rest), required
       re-auth (password) to enable/disable, optional "remember this device
       30 days" cookie (separate signed token). SMS explicitly rejected
@@ -352,7 +352,7 @@ bcrypt hashing exists, no verification/reset/2FA. Target flow:
       and personalizations; the privacy promise in USER_PROGRESS made real).
 
 ### 6.2 Authorization model
-- [ ] Roles: `user`, `admin`. Admin: user management, clone takedown/opt-out
+- [x] Roles (done): `user`, `admin`. Admin: user management, clone takedown/opt-out
       list, feature flags, job queue dashboard.
 - [ ] Object-level checks everywhere (OWASP #1 is Broken Access Control):
       saved games, personalizations, and sessions are owner-scoped — write
