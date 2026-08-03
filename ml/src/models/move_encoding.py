@@ -159,6 +159,14 @@ def encode_move(move: chess.Move, board: chess.Board) -> int:
         key_no_promo = (from_sq, to_sq, None)
         if key_no_promo in _ENCODE_TABLE:
             return _ENCODE_TABLE[key_no_promo]
+        # Shared-slot semantics (matches Leela's scheme): a rank-7→8
+        # queen-line slot is registered with promotion=QUEEN because pawns
+        # promoting use it — but a bishop/rook/queen/king making the same
+        # geometric move shares the slot with promotion=None.
+        if promotion is None:
+            key_promo = (from_sq, to_sq, chess.QUEEN)
+            if key_promo in _ENCODE_TABLE:
+                return _ENCODE_TABLE[key_promo]
         raise ValueError(
             f"Cannot encode move {move.uci()} (from={from_sq}, to={to_sq}, "
             f"promo={promotion}) from board:\n{board.fen()}"
@@ -182,6 +190,14 @@ def decode_move(index: int, board: chess.Board) -> chess.Move:
     if board.turn == chess.BLACK:
         from_sq = _mirror_square(from_sq)
         to_sq = _mirror_square(to_sq)
+
+    # Shared-slot semantics: the rank-7→8 queen-line slots carry
+    # promotion=QUEEN for pawns, but the same slot decodes to a plain move
+    # when the mover isn't a pawn (Rf8+, Kg8, Qxa8 ...).
+    if promotion is not None:
+        piece = board.piece_at(from_sq)
+        if piece is None or piece.piece_type != chess.PAWN:
+            promotion = None
 
     return chess.Move(from_sq, to_sq, promotion=promotion)
 
