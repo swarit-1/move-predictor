@@ -21,7 +21,7 @@ import torch.nn.functional as F
 import chess
 from dataclasses import dataclass
 
-from src.models.move_encoding import decode_move, get_legal_move_mask
+from src.models.move_encoding import decode_move, encode_move, get_legal_move_mask
 from src.inference.blind_spots import (
     BlindSpotConfig,
     compute_blind_spot_biases,
@@ -454,6 +454,23 @@ def sample_move(
             logits = pre_bias + (bs_result.modified_logits - pre_bias) * blind_spot_scale
         else:
             logits = bs_result.modified_logits
+
+    # Mate-in-one salience (PLAN.md §1.2 believability): humans spot
+    # immediate mates far more reliably than a 2-epoch policy does. Boost
+    # any mating move with a rating-scaled bonus — near-forced at 2000+,
+    # a strong pull at club level, only a nudge for beginners (who really
+    # do miss mates).
+    mate_boost = 2.0 + max(0.0, (player_rating - 600.0)) / 250.0
+    for _move in board.legal_moves:
+        if board.gives_check(_move):
+            board.push(_move)
+            is_mate = board.is_checkmate()
+            board.pop()
+            if is_mate:
+                try:
+                    logits[encode_move(_move, board)] += mate_boost
+                except (ValueError, IndexError):
+                    continue
 
     # Mask illegal moves
     logits[~legal_mask] = float("-inf")
