@@ -37,10 +37,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from src.config import settings
 from src.data.preprocessing import board_to_tensor, classify_game_phase
+from src.data.validation import validate_source, validate_username
 from src.db import cache as profile_cache
 from src.inference.pipeline import prediction_pipeline
 from src.models.move_encoding import encode_move
@@ -65,6 +66,26 @@ class PersonalizeRequest(BaseModel):
     steps: int = DEFAULT_STEPS
     batch_size: int = DEFAULT_BATCH_SIZE
     learning_rate: float = DEFAULT_LR
+
+    @field_validator("username")
+    @classmethod
+    def _username_safe(cls, v: str) -> str:
+        return validate_username(v)
+
+    @field_validator("source")
+    @classmethod
+    def _source_safe(cls, v: str) -> str:
+        return validate_source(v)
+
+    @field_validator("steps")
+    @classmethod
+    def _steps_bounded(cls, v: int) -> int:
+        return max(1, min(v, 1000))
+
+    @field_validator("batch_size")
+    @classmethod
+    def _batch_bounded(cls, v: int) -> int:
+        return max(1, min(v, 128))
 
 
 class PersonalizeResponse(BaseModel):

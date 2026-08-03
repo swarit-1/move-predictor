@@ -86,6 +86,15 @@ if [ -n "$SF_BIN" ]; then
   echo -e "${GREEN}Stockfish: $SF_BIN${NC}"
   # Carry the Lichess token over from the root .env (raises explorer rate limits)
   LICHESS_TOKEN=$(grep '^LICHESS_API_TOKEN=' "$ROOT_DIR/.env" 2>/dev/null | cut -d= -f2)
+  # PLAN.md S1/S2: generate local secrets once; backend refuses to boot
+  # without JWT_SECRET, and the ML service requires the shared internal key.
+  if ! grep -q '^JWT_SECRET=' "$ROOT_DIR/backend/.env" 2>/dev/null; then
+    echo "JWT_SECRET=$(openssl rand -hex 32)" >> "$ROOT_DIR/backend/.env"
+  fi
+  if ! grep -q '^ML_INTERNAL_KEY=' "$ROOT_DIR/backend/.env" 2>/dev/null; then
+    echo "ML_INTERNAL_KEY=$(openssl rand -hex 24)" >> "$ROOT_DIR/backend/.env"
+  fi
+  ML_KEY=$(grep '^ML_INTERNAL_KEY=' "$ROOT_DIR/backend/.env" | cut -d= -f2)
   # Write .env for ML service
   cat > "$ROOT_DIR/ml/.env" <<EOL
 STOCKFISH_PATH=$SF_BIN
@@ -93,6 +102,7 @@ DATABASE_URL=sqlite+aiosqlite:///./move_predictor.db
 REDIS_URL=redis://localhost:6379
 DEVICE=cpu
 LICHESS_API_TOKEN=$LICHESS_TOKEN
+ML_INTERNAL_KEY=$ML_KEY
 EOL
 else
   echo -e "${YELLOW}⚠ Stockfish not found. Engine analysis will be unavailable.${NC}"
@@ -104,8 +114,10 @@ echo ""
 # ── Start ML service ────────────────────────────────────────
 
 echo -e "${BLUE}Starting ML service on :8000...${NC}"
+# PLAN.md S2: bind localhost only — the ML service must never be reachable
+# from the network directly (the gateway is the only client).
 cd "$ROOT_DIR/ml"
-python3 -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload \
+python3 -m uvicorn src.main:app --host 127.0.0.1 --port 8000 --reload \
   > "$LOG_DIR/ml.log" 2>&1 &
 ML_PID=$!
 

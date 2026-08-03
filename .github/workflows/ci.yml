@@ -21,6 +21,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
@@ -47,9 +48,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+        env:
+          # prisma generate (postinstall) needs the schema only, not a live DB
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
 
       - name: Type check
         run: npx tsc --noEmit
@@ -59,6 +65,11 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          # PLAN.md S1: config refuses to boot without a secret — CI uses a
+          # throwaway one.
+          JWT_SECRET: "ci-only-throwaway-secret-not-used-anywhere-real"
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
 
   frontend:
     name: Frontend
@@ -74,9 +85,60 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
 
       - name: Build
         run: npx vite build
+
+  security:
+    name: Security (PLAN.md S3/S13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Dependency audits are informational until the baseline is clean,
+      # then flip continue-on-error off (tracked in PLAN.md §7.2).
+      - name: npm audit (backend)
+        working-directory: backend
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: npm audit (frontend)
+        working-directory: frontend
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: pip-audit (ml)
+        working-directory: ml
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable -r <(python3 -c "
+          import tomllib
+          deps = tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']
+          print('\n'.join(deps))
+          ")
+        continue-on-error: true

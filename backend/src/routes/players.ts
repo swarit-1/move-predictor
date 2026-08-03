@@ -6,10 +6,16 @@ import { logger } from "../config";
 
 export const playersRouter = Router();
 
+// PLAN.md S6: usernames reach upstream URLs and cache keys — enforce the
+// site charset here AND at the ML boundary (defense in depth).
+export const chessUsernameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{2,32}$/, "Invalid username");
+
 const buildProfileSchema = z.object({
   source: z.enum(["lichess", "chesscom"]),
-  username: z.string().min(1).max(100),
-  max_games: z.number().int().min(10).max(5000).optional().default(200),
+  username: chessUsernameSchema,
+  max_games: z.number().int().min(10).max(500).optional().default(200),
   time_control: z
     .enum(["bullet", "blitz", "rapid", "classical"])
     .optional()
@@ -35,8 +41,18 @@ playersRouter.post("/build-profile", async (req: Request, res: Response) => {
     res.json({ success: true, data: profile });
   } catch (error: any) {
     logger.error("Build profile failed", { error: error.message });
-    const status = error.name === "ZodError" ? 400 : 500;
-    res.status(status).json({ success: false, error: error.message });
+    if (error.name === "ZodError") {
+      res.status(400).json({ success: false, error: error.message });
+      return;
+    }
+    const upstream = error?.response?.status;
+    res.status(upstream === 429 ? 429 : 502).json({
+      success: false,
+      error:
+        upstream === 429
+          ? "The chess site is rate-limiting us — retrying shortly. Your clone will finish building in a couple of minutes."
+          : "Profile build failed — please try again.",
+    });
   }
 });
 
@@ -47,7 +63,7 @@ playersRouter.post("/build-profile", async (req: Request, res: Response) => {
  */
 const personalizeSchema = z.object({
   source: z.enum(["lichess", "chesscom"]),
-  username: z.string().min(1).max(100),
+  username: chessUsernameSchema,
   steps: z.number().int().min(1).max(2000).optional(),
   batch_size: z.number().int().min(1).max(256).optional(),
   learning_rate: z.number().min(1e-6).max(1.0).optional(),

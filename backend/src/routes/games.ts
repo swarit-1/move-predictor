@@ -8,7 +8,9 @@ export const gamesRouter = Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  // PLAN.md S8: a PGN of real games is tiny — 5 MB holds ~2,000 games.
+  // Anything larger is abuse or a mistake.
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 }, // 5MB
   fileFilter: (_req, file, cb) => {
     if (file.originalname.endsWith(".pgn") || file.mimetype === "text/plain") {
       cb(null, true);
@@ -20,7 +22,7 @@ const upload = multer({
 
 const importSchema = z.object({
   source: z.enum(["lichess", "chesscom"]),
-  username: z.string().min(1).max(100),
+  username: z.string().regex(/^[A-Za-z0-9_-]{2,32}$/, "Invalid username"),
   max_games: z.number().int().min(1).max(5000).optional().default(200),
 });
 

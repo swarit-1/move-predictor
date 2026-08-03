@@ -6,9 +6,10 @@ from io import StringIO
 
 import chess.pgn
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from src.data.opening_book import OpeningBook
+from src.data.validation import validate_source, validate_username
 from src.data.personal_explorer import PersonalExplorer
 from src.db import cache as profile_cache
 from src.inference.pipeline import prediction_pipeline
@@ -37,6 +38,21 @@ class BuildProfileRequest(BaseModel):
     username: str
     max_games: int = 200
     time_control: str | None = None  # "bullet", "blitz", "rapid", "classical"
+
+    @field_validator("username")
+    @classmethod
+    def _username_safe(cls, v: str) -> str:
+        return validate_username(v)
+
+    @field_validator("source")
+    @classmethod
+    def _source_safe(cls, v: str) -> str:
+        return validate_source(v)
+
+    @field_validator("max_games")
+    @classmethod
+    def _max_games_bounded(cls, v: int) -> int:
+        return max(1, min(v, 500))
 
 
 class PlayerProfile(BaseModel):

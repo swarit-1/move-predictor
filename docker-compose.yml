@@ -3,11 +3,14 @@ services:
   # migrations can never clobber each other. Both run the same image but
   # with different data volumes and credentials.
 
+  # PLAN.md S5: credentials are env-overridable. The 'postgres' default
+  # exists ONLY for pre-existing local dev volumes; production uses managed
+  # databases (PLAN.md §8), never this compose file.
   postgres-app:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:-postgres}
       POSTGRES_DB: appdb
     ports:
       - "5432:5432"
@@ -23,7 +26,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ML_PASSWORD:-postgres}
       POSTGRES_DB: mldb
     ports:
       - "5433:5432"

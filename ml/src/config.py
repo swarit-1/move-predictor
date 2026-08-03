@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Lichess
     lichess_api_token: str = ""
 
+    # PLAN.md S2: shared secret required on every request when set. The
+    # gateway sends it as X-Internal-Key; direct network access is denied.
+    ml_internal_key: str = ""
+
     # Training
     device: str = "cpu"
     batch_size: int = 1024

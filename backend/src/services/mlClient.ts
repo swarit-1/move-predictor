@@ -53,7 +53,14 @@ class MLClient {
     this.client = axios.create({
       baseURL: config.mlServiceUrl,
       timeout: 30000,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // PLAN.md S2: authenticate to the ML service; it rejects requests
+        // without this key when configured.
+        ...(config.mlInternalKey
+          ? { "X-Internal-Key": config.mlInternalKey }
+          : {}),
+      },
     });
   }
 

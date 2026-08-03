@@ -19,18 +19,35 @@ export function createApp() {
 
   // Middleware
   app.use(helmet());
-  app.use(cors());
-  app.use(express.json({ limit: "10mb" }));
-
-  // Rate limiting
+  // PLAN.md S7: allowlist origins when configured (required in prod);
+  // permissive only for local dev tooling.
   app.use(
-    "/api/",
-    rateLimit({
-      windowMs: 60 * 1000, // 1 minute
-      max: 100,
-      message: { error: "Too many requests, please try again later" },
-    })
+    config.corsOrigins.length > 0
+      ? cors({ origin: config.corsOrigins })
+      : cors()
   );
+  app.use(express.json({ limit: "2mb" }));
+
+  // PLAN.md S9: tiered rate limits — cheap reads get headroom, model
+  // inference is bounded, expensive pipelines are scarce. Keyed by IP now;
+  // keyed by user id once auth middleware lands (§6).
+  const limiter = (windowMs: number, max: number) =>
+    rateLimit({
+      windowMs,
+      max,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { success: false, error: "Too many requests, please slow down" },
+    });
+  // Expensive: profile builds, personalize, review, coach
+  app.use("/api/players/build-profile", limiter(60 * 60 * 1000, 20));
+  app.use("/api/predict/review", limiter(60 * 60 * 1000, 30));
+  app.use("/api/predict/coach", limiter(60 * 60 * 1000, 10));
+  // Inference
+  app.use("/api/predict", limiter(60 * 1000, 60));
+  app.use("/api/simulate", limiter(60 * 1000, 90));
+  // Everything else
+  app.use("/api/", limiter(60 * 1000, 300));
 
   // Routes
   app.use("/api/auth", authRouter);

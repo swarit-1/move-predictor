@@ -46,6 +46,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.middleware("http")
+async def require_internal_key(request, call_next):
+    """PLAN.md S2: when ML_INTERNAL_KEY is configured, every request must
+    carry it. The gateway is the only legitimate client; health stays open
+    for infra probes."""
+    from fastapi.responses import JSONResponse
+    from src.config import settings
+
+    if settings.ml_internal_key and request.url.path != "/ml/health":
+        import hmac
+
+        provided = request.headers.get("x-internal-key", "")
+        if not hmac.compare_digest(provided, settings.ml_internal_key):
+            return JSONResponse(status_code=401, content={"detail": "unauthorized"})
+    return await call_next(request)
+
 app.include_router(health_router, prefix="/ml")
 app.include_router(predict_router, prefix="/ml")
 app.include_router(analyze_router, prefix="/ml")
