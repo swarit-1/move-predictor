@@ -203,7 +203,14 @@ def main():
         "gates": {},
     }
     report["gates"]["top1_vs_target_33"] = report["masked_top1"] >= 0.33
+    # Mate gate: the clone must convert at least as reliably as the real
+    # humans did on the same positions (matching, not exceeding, is the
+    # product). At 2000+ the absolute never-miss rule applies on top.
     if args.rating >= 1600:
+        report["gates"]["mate_conversion_matches_humans"] = (
+            mate_hits >= human_mate_hits
+        )
+    if args.rating >= 2000:
         report["gates"]["mate_in_one_never_missed"] = (
             mate_positions == 0 or mate_hits == mate_positions
         )
