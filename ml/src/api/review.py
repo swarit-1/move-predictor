@@ -238,6 +238,19 @@ async def review_game(request: ReviewRequest) -> ReviewResponse:
             -10000 if (eval_after_mate is not None and eval_after_mate > 0) else 0
         )
 
+        # Terminal positions have no engine score: a mating move used to
+        # fall through to 0 here, scoring CPL 10000 — "checkmate, the worst
+        # blunder in history". Check the board directly.
+        try:
+            _term_board = chess.Board(positions[ply])
+            _term_board.push(chess.Move.from_uci(request.moves[ply]))
+            if _term_board.is_checkmate():
+                actual_eval_mover = 10000  # mover delivered mate — perfect
+            elif _term_board.is_stalemate() or _term_board.is_insufficient_material():
+                actual_eval_mover = 0  # drawn on the spot
+        except Exception:
+            pass
+
         cpl = max(0, best_eval_mover - actual_eval_mover)
 
         # Mark first 16 half-moves as "book" (8 full moves) — no classification

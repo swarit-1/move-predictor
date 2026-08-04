@@ -435,6 +435,19 @@ def sample_move(
             except (ValueError, IndexError):
                 continue
 
+    # Defense in depth: non-finite logits (NaN/inf from any upstream bug)
+    # must never reach multinomial — that is how "random" moves happen.
+    # Replace with zeros (uniform over legal after masking) and log loudly.
+    if not torch.isfinite(policy_logits).all():
+        import logging
+
+        logging.getLogger(__name__).error(
+            "Non-finite policy logits detected (fen=%s) — falling back to "
+            "uniform-over-legal. Upstream bug needs fixing.",
+            board.fen()[:60],
+        )
+        policy_logits = torch.zeros_like(policy_logits)
+
     # Get legal move mask
     legal_mask = torch.from_numpy(get_legal_move_mask(board)).to(policy_logits.device)
 
@@ -471,6 +484,27 @@ def sample_move(
                     logits[encode_move(_move, board)] += mate_boost
                 except (ValueError, IndexError):
                     continue
+
+    # Free-hang filter (PLAN.md §1.2): humans reflexively prune "my piece
+    # gets taken by something cheaper for free". Early-training policies
+    # haven't learned this (self-play audits measured ~4% of moves being
+    # outright give-aways at 5-19% model probability). Penalize at rating
+    # scale — near-eliminated at club level and above, softened for
+    # beginners, and proportional to how much material is donated.
+    # ~1 ms per call: one push/pop per legal move.
+    from src.inference.tactics import free_hang_net
+
+    hang_awareness = min(1.0, max(0.15, (player_rating - 400.0) / 1200.0))
+    for _move in board.legal_moves:
+        net = free_hang_net(board, _move)
+        if net <= -3:
+            try:
+                idx = encode_move(_move, board)
+            except (ValueError, IndexError):
+                continue
+            # -3 (minor for nothing) → ~2.7 logits at 1600+;
+            # -9 (queen for nothing) → ~8 logits at 1600+.
+            logits[idx] -= hang_awareness * (-net) * 0.9
 
     # Mask illegal moves
     logits[~legal_mask] = float("-inf")

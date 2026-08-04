@@ -85,6 +85,16 @@ class SequenceEncoder(nn.Module):
         # Create padding mask (True = ignore)
         padding_mask = move_indices == 0  # (B, T)
 
+        # Guard: a fully-padded row (game start — no history yet) would mask
+        # every attention key, which NaNs on CPU backends (MPS returns zeros,
+        # which is why training never tripped this). Un-mask position 0 for
+        # such rows: it attends to the padding embedding (a constant), giving
+        # a well-defined "no history" representation instead of NaN.
+        fully_padded = padding_mask.all(dim=1)  # (B,)
+        if fully_padded.any():
+            padding_mask = padding_mask.clone()
+            padding_mask[fully_padded, 0] = False
+
         # Embed moves
         x = self.move_embedding(move_indices)  # (B, T, d_model)
 
