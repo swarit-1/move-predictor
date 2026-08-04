@@ -80,7 +80,7 @@ This is the feature we market. It must be flawless before anything else ships.
 | **Move-match top-1** | clone's argmax = player's actual move, cross-month held-out | **≥ 33%** (path to 40%+ in §2) | 22.7–25.5% |
 | **Move-match top-3** | actual move in clone's top 3 | ≥ 55% | ~45% (est.) |
 | **Strength calibration** | clone's measured Elo (vs Stockfish-limited ladder, 100 games) within ±100 of target | ±100 Elo | unmeasured |
-| **Blunder realism** | clone blunder rate within ±25% relative of the bracket's real rate, and blunders are *human-typed* (hung pieces, missed tactics) not random | pass | partially (blind spots + error head) |
+| **Blunder realism** | clone blunder rate within ±25% relative of the bracket's real rate, and blunders are *human-typed* (hung pieces, missed tactics) not random | pass | **free-hang class SOLVED 2026-08-04**: 1,500-game audit, 147k moves — give-away rate 0.01–0.11% at club+, 0.90% at 900 (human-shaped gradient; was 3.9%). CPL-distribution match still open |
 | **Opening fidelity** | ≥ 70% of clone games open inside the player's actual repertoire (for players with ≥ 30 games) | ≥ 70% | high (book + prior) — measure it |
 | **Turing panel** | blind A/B: show 20 games (10 clone-vs-engine-limited, 10 real player games) to 3 club players; they identify the clone no better than 65% | pass | untested |
 
