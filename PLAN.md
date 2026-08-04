@@ -133,7 +133,16 @@ expected accuracy-per-effort:
       bracket; preprocessing ~30 min; disk ~45 GB — prune after).
 - [x] **Fill remaining brackets** (M1 pipeline in flight): 400-800, 800-1000, 1200-1400, 1600-1800,
       2000-2200, 2200-2500 so nearest-bracket fallback is never > 100 Elo off.
-- [ ] Expected landing: **top-1 30–34%** cross-month.
+- [x] **M1 COMPLETE 2026-08-04.** All 9 brackets trained on fixed-encoder
+      data. Cross-month masked top-1 (top-5): extended 4-epoch brackets —
+      1000-1200: 28.9% (57.1), 1400-1600: **32.8%** (61.5), 1800-2000:
+      **31.9%** (60.2). Fresh 2-epoch brackets — 400-800: 19.8%, 800-1000:
+      20.3%, 1200-1400: 23.2%, 1600-1800: 23.7%, 2000-2200: 21.4%,
+      2200-2500: 23.6%. Val top-1 for extended brackets: 33.2–33.7%.
+      **Proven: +2 epochs ≈ +6–8 pts cross-month.** Next lever: extend the
+      six 2-epoch brackets (+2 epochs, ~2.5 h each — queue when the laptop
+      is free) to bring everything into the 28–33% band. Original target:
+      top-1 30–34% cross-month — hit for extended brackets.
 
 ### Phase M2 — Stats-conditioned single model (Maia-2 style; the v2 unlock)
 - [ ] Extend the preprocessor to compute the real 33-dim stats vector per
