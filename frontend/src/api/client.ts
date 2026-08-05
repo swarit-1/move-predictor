@@ -180,6 +180,7 @@ export async function predictMove(
       repertoire_width?: number;
       endgame_strength?: number;
       defensive_tenacity?: number;
+      pawn_aggression?: number;
     };
     time_remaining?: number;
     time_control_initial?: number;

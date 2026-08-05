@@ -31,7 +31,7 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| §4.1 | 12-slider taxonomy | ✅ (10 of 13) | Skipped: Pawn Aggression (niche), Color-Specific Mode (deferred — requires color-conditioned stats vector). Shipped: 10 dimensions with full sampler integration. |
+| §4.1 | 12-slider taxonomy | ✅ (13 of 13) | **Completed 2026-08-05**: Pawn Aggression shipped (storm-push stat + rating-scale slider + sampler flank/space bias, full stack) and Color-Specific Mode shipped (per-color stats computed at build when ≥10 games per color, cached in Redis, auto-selected by side-to-move at predict — PRD's 'selector not slider' spec). 33-dim vector unchanged for checkpoint compatibility; new stat drives baselines/sampler only. |
 | §4.2 | Stats expansion | ✅ | 8 new fields: `sacrifice_rate`, `eval_volatility`, `king_attack_intensity`, `quiet_move_ratio`, `opening_cpl`, `middlegame_cpl`, `endgame_cpl`, `capture_initiation_rate`. Plus actually populating `avg_move_time` and `time_pressure_tendency` from `[%clk]` annotations. |
 | §4.3 | Feed into model | ✅ | `num_player_stats` bumped 25 → 33. Model auto-scales (forward smoke test verified). |
 | §4.4 | UX (basics + advanced toggle, baseline tick marks, reset-to-clone) | ✅ | `StyleSliders.tsx` rewritten with paginated groups. |
@@ -46,7 +46,7 @@
 | §5.1 | P0 — Persistence + reliability | ✅ | Complete. All sub-items: frontend persist, Redis profile cache, build lock, inference concurrency, premove safety. |
 | §5.2 | P0 — Visible style sliders | ✅ | Complete. See §4 above. |
 | §5.3 | P0 — Chess.com parity | ✅ | `PersonalExplorer` + lightweight Stockfish CPL pass at build time. Chess.com profiles now get real CPL/blunder stats + position-keyed personal move data. Full parity with Lichess. **2026-08-01: rating-pool translation shipped** — Chess.com ratings run a few hundred points below Lichess at the same strength; `ml/src/data/rating_translation.py` translates them to the internal Lichess scale for bracket selection, model conditioning, and sampler schedules (profile builds automatic; `rating_pool` field on predict/simulate; By-Rating tab has a Lichess/Chess.com scale toggle). Display keeps the platform rating. |
-| §5.4 | P0 — Train 8 bracket checkpoints | ✅ (3 of 9 lean) | Lean plan executed locally 2026-07-31 (see §3.2): 3 brackets covering >70% of rated players; every other rating maps to the nearest trained bracket automatically. Remaining 6 brackets are one command each: `make train-bracket MIN=1600 MAX=1800`. |
+| §5.4 | P0 — Train 8 bracket checkpoints | ✅ (9 of 9) | **All nine brackets trained (2026-08-04)** on fixed-encoder data. Cross-month masked top-1: extended 4-epoch brackets 28.9–32.8%; fresh 2-epoch brackets 19.8–23.7%. Full 400–2500 coverage; +2-epoch extensions for the fresh six are queued (proven +6–8 pts each). |
 | §5.5 | P1 — Per-player Phase 3 fine-tune | ✅ | Active and verified (see §3.3). **2026-07-31: now fully automatic** — build-profile triggers a background fine-tune (worker thread, non-blocking); the opponent badge surfaces the progressive stage (Generic → Repertoire → Personalized) via `GET /api/players/clone-status/:key`. The model path also blends the player's `PersonalExplorer` position history into the policy logits (`personal_prior_boost` in config). |
 | §5.6 | P1 — Play-yourself flow | ✅ | `User` model gained `linkedChessSource`/`linkedChessUsername`. New `POST /api/auth/link-chess`. `WelcomeScreen` surfaces a "Play yourself" button + an inline link form. `App.tsx::handlePlayYourself` builds the profile and drops into a game. |
 | §5.7 | P1 — Game review against clone | ✅ | `/ml/review` accepts `clone_player_key` + `clone_color`; surfaces "your real opponent would not have made this mistake" as an amber panel in `MoveDetail`. |
@@ -72,7 +72,7 @@
 | Section | Status | Notes |
 |---|---|---|
 | §7 Architecture diagrams | ✅ in PRD | Current as of the audit. |
-| §8 Metrics and eval | ✅ | `scripts/eval_harness.py` ships — replays held-out games through the prediction pipeline and reports top-1 / top-5 accuracy, avg predicted CPL, per bracket. Outputs JSON. Run after §5.4 training with `python3 scripts/eval_harness.py data/raw/eval_games.pgn --rating-min 1400 --rating-max 1600`. |
+| §8 Metrics and eval | ✅ | `eval_harness.py` + `believability_report.py` (per-checkpoint gates: masked/sampled top-1/3/5, **CPL KL-divergence** and mean-CPL calibration (predicted 59.8 vs actual 60.0 cp at 1500), **opening repertoire reproduction** (first-12 argmax), mate-conversion vs human baseline) + `selfplay_audit.py` (1,500-game blunder taxonomy, free-hang gradient 0.01–0.9% by rating) + `inference_ms` latency field on every predict response (§8.1 p95 target). |
 | §9 Risks and mitigations | ℹ️ | Reference doc; nothing to "ship." |
 | §10 Cut list | ℹ️ | Reference doc. |
 | §11 YC story one-pager | ℹ️ | Reference doc; you'll lift this into the deck. |
@@ -88,19 +88,25 @@ Run this anytime to verify the in-session work hasn't regressed:
 # Frontend
 cd frontend && npx tsc --noEmit                  # expect: clean
 
-# Backend
+# Backend (requires local Postgres up: docker compose up -d postgres-app)
 cd backend && npx prisma generate                # required after schema changes
 cd backend && npx tsc --noEmit                   # expect: clean
-cd backend && npm test                           # expect: 8 passed
+cd backend && npm test                           # expect: 36 passed
 
 # ML
-cd ml && python3 -m pytest tests/ -q             # expect: 64 passed
+cd ml && python3 -m pytest tests/ -q             # expect: 119 passed
 
-# Model quality (cross-month held-out games)
-cd ml && python3 scripts/eval_harness.py data/eval/lichess_2025-05_1400-1600.pgn \
-  --checkpoint data/checkpoints/1400_1600/phase1_best.pt --max-games 60
+# Model quality gates (cross-month held-out games)
+cd ml && python3 scripts/believability_report.py \
+  data/checkpoints/1400_1600/phase1_best.pt \
+  data/eval/lichess_2025-05_1400-1600.pgn --rating 1500 --max-games 40
+
+# Blunder-realism audit (self-play, free-hang taxonomy)
+cd ml && python3 scripts/selfplay_audit.py --bracket 1400_1600 --rating 1500 \
+  --games 100 --device mps
 ```
 
-Last green run (2026-07-31): frontend TS clean, backend TS clean, 8/8 backend
-tests, 64/64 ML tests, humanization smoke test 5/5 rating levels pass,
-eval harness top-1 20–23% / top-5 41–52% per bracket (sampled, product-level).
+Last green run (2026-08-05): frontend TS clean, backend TS clean, 36/36
+backend tests, 119/119 ML tests, believability gates pass on extended
+brackets (top-1 ≥33%, mate conversion = human baseline), free-hang rate
+0.01–0.11% at club ratings across 1,500 audited self-play games.

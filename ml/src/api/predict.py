@@ -38,6 +38,9 @@ class PredictResponse(BaseModel):
     # PLAN.md §1.4: "resign" | "offer_draw" | None for the side that just
     # got a move sampled.
     suggested_action: str | None = None
+    # PRD §8.1: server-side wall time for this prediction (p95 target
+    # <= 500 ms) — surfaces in every response for latency dashboards.
+    inference_ms: float | None = None
 
 
 @router.post("/predict")
@@ -47,6 +50,9 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
     Uses the neural network model with skill-aware sampling to generate
     a realistic human move prediction.
     """
+    import time as _time
+
+    _t0 = _time.perf_counter()
     import chess
     from src.inference.pipeline import prediction_pipeline
     from src.inference.sampler import StyleOverrides
@@ -92,6 +98,7 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
             repertoire_width=ov.get("repertoire_width", 50.0),
             endgame_strength=ov.get("endgame_strength", 50.0),
             defensive_tenacity=ov.get("defensive_tenacity", 50.0),
+            pawn_aggression=ov.get("pawn_aggression", 50.0),
         )
 
     # Get Stockfish analysis for comparison (non-blocking)
@@ -185,4 +192,5 @@ async def predict_move(request: PredictRequest) -> PredictResponse:
         explanation=explanation,
         think_time_ms=think_time_ms,
         suggested_action=suggested_action,
+        inference_ms=round((_time.perf_counter() - _t0) * 1000.0, 1),
     )

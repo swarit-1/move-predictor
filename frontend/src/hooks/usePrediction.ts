@@ -82,6 +82,7 @@ export function usePrediction() {
             repertoire_width: styleOverrides.repertoire_width,
             endgame_strength: styleOverrides.endgame_strength,
             defensive_tenacity: styleOverrides.defensive_tenacity,
+            pawn_aggression: styleOverrides.pawn_aggression,
           },
           time_remaining: timeControl ? opponentTimeLeft : undefined,
           time_control_initial: timeControl ? timeControl.initial : undefined,

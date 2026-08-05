@@ -77,6 +77,7 @@ const predictSchema = z.object({
       repertoire_width: z.number().min(0).max(100).optional(),
       endgame_strength: z.number().min(0).max(100).optional(),
       defensive_tenacity: z.number().min(0).max(100).optional(),
+      pawn_aggression: z.number().min(0).max(100).optional(),
     })
     .optional(),
   time_remaining: z.number().min(0).optional(),

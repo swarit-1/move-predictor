@@ -49,6 +49,7 @@ export interface StyleOverrides {
   repertoire_width: number;
   endgame_strength: number;
   defensive_tenacity: number;
+  pawn_aggression: number;
 }
 
 interface PlayerState {
@@ -77,6 +78,7 @@ const DEFAULT_STYLE: StyleOverrides = {
   repertoire_width: 50,
   endgame_strength: 50,
   defensive_tenacity: 50,
+  pawn_aggression: 50,
 };
 
 // PRD §5.1 / §6.1: persist opponent + style overrides to sessionStorage so

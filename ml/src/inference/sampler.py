@@ -66,6 +66,10 @@ class StyleOverrides:
     defensive_tenacity: float = 50.0
     """Higher = plays sharper / less likely to drift when in worse positions."""
 
+    pawn_aggression: float = 50.0
+    """PRD §4.1 #11: higher = more flank pawn storms and space-grabbing
+    pawn advances, especially in the middlegame."""
+
 
 @dataclass
 class SampledMove:
@@ -194,6 +198,7 @@ def apply_style_bias(
         and style.king_attack == 50.0
         and style.positional == 50.0
         and style.trade_preference == 50.0
+        and style.pawn_aggression == 50.0
     ):
         return logits
 
@@ -202,6 +207,7 @@ def apply_style_bias(
     modified = logits.clone()
 
     aggression_boost = (style.aggression - 50.0) / 100.0       # -0.5 to +0.5
+    pawn_storm_boost = (style.pawn_aggression - 50.0) / 100.0  # -0.5 to +0.5
     king_attack_boost = (style.king_attack - 50.0) / 100.0     # -0.5 to +0.5
     # positional > 50 favours quiet; < 50 favours tactical.
     positional_boost = (style.positional - 50.0) / 100.0       # -0.5 to +0.5
@@ -234,6 +240,18 @@ def apply_style_bias(
             bonus += aggression_boost * 1.5
         if is_check:
             bonus += aggression_boost * 1.0
+
+        # — Pawn aggression (PRD §4.1 #11): flank pushes + space grabs
+        if pawn_storm_boost != 0.0:
+            _pc = board.piece_at(move.from_square)
+            if _pc is not None and _pc.piece_type == chess.PAWN:
+                _f = chess.square_file(move.to_square)
+                _r = chess.square_rank(move.to_square)
+                _adv = _r if _pc.color == chess.WHITE else 7 - _r
+                if _f in (0, 1, 6, 7):
+                    bonus += pawn_storm_boost * 1.2
+                elif _adv >= 4:
+                    bonus += pawn_storm_boost * 0.8
 
         # — Positional vs tactical: positive value rewards quiet moves,
         #   negative value rewards forcing moves.

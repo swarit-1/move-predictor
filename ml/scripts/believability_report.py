@@ -124,8 +124,11 @@ def main():
     model = load_model(args.checkpoint)
 
     top1 = top3 = top5 = sampled_top1 = total = 0
-    clone_blunderish = 0  # sampled move's engine-agreement proxy
     mate_positions = mate_hits = human_mate_hits = 0
+    # PRD §8.1: distributions for CPL KL-divergence + opening repertoire
+    predicted_cpls: list[float] = []
+    actual_cpls: list[float] = []
+    first12_total = first12_match = 0
 
     with open(args.eval_pgn) as f:
         for g in range(args.max_games):
@@ -134,13 +137,23 @@ def main():
                 break
             board = game.board()
             hist: list[int] = []
-            for ply, move in enumerate(game.mainline_moves()):
+            prev_eval_white = 17.0
+            for ply, node in enumerate(game.mainline()):
+                move = node.move
                 try:
                     target = encode_move(move, board)
                 except (ValueError, IndexError):
                     board.push(move)
                     hist.append(0)
                     continue
+                # PRD §8.1 opening repertoire reproduction: does the
+                # clone's argmax reproduce the human's opening moves?
+                if ply < 12 and not board.is_game_over():
+                    o = forward_logits(model, board, args.rating, hist)
+                    first12_total += 1
+                    if int(torch.argmax(o["policy_logits"][0])) == target:
+                        first12_match += 1
+
                 if ply >= SKIP_OPENING and not board.is_game_over():
                     out = forward_logits(model, board, args.rating, hist)
                     logits = out["policy_logits"][0]
@@ -150,6 +163,18 @@ def main():
                     top1 += int(topk[0] == target)
                     top3 += int(target in topk[:3])
                     top5 += int(target in topk)
+
+                    # PRD §8.1 KL: predicted vs actual CPL distributions
+                    predicted_cpls.append(
+                        max(0.0, out["cpl_pred"][0].item()) * 500.0
+                    )
+                    score = node.eval()
+                    if score is not None and prev_eval_white is not None:
+                        cur = float(score.white().score(mate_score=1000))
+                        sign = 1.0 if board.turn == chess.WHITE else -1.0
+                        actual_cpls.append(
+                            max(0.0, sign * prev_eval_white - sign * cur)
+                        )
 
                     cpl_pred = max(0.0, out["cpl_pred"][0].item())
                     blunder_p = torch.sigmoid(out["blunder_logit"][0]).item()
@@ -179,9 +204,32 @@ def main():
                         board.pop()
 
                 hist.append(target)
+                score = node.eval()
+                if score is not None:
+                    prev_eval_white = float(score.white().score(mate_score=1000))
+                else:
+                    prev_eval_white = None
                 board.push(move)
 
     real_rate, real_n = real_blunder_rate(args.eval_pgn, args.max_games)
+
+    # PRD §8.1: KL(actual || predicted) over binned CPL distributions.
+    # "We want the model to lose 12 cp per move at 1500, not 0 and not 80."
+    def _binned(values):
+        bins = [0, 10, 25, 50, 100, 200, 500, 10_000]
+        counts = np.zeros(len(bins) - 1)
+        for v in values:
+            for i in range(len(bins) - 1):
+                if bins[i] <= v < bins[i + 1]:
+                    counts[i] += 1
+                    break
+        p = counts + 1e-6
+        return p / p.sum()
+
+    cpl_kl = None
+    if predicted_cpls and actual_cpls:
+        pa, pp = _binned(actual_cpls), _binned(predicted_cpls)
+        cpl_kl = float(np.sum(pa * np.log(pa / pp)))
 
     # Clone blunder rate needs engine evals of sampled moves — expensive.
     # Proxy for the report: the error head's mean predicted blunder prob
@@ -197,6 +245,10 @@ def main():
         "sampled_top1": round(sampled_top1 / max(total, 1), 4),
         "bracket_real_blunder_rate": round(real_rate, 4),
         "bracket_real_blunder_n": real_n,
+        "cpl_kl_divergence": round(cpl_kl, 4) if cpl_kl is not None else None,
+        "mean_predicted_cpl": round(float(np.mean(predicted_cpls)), 1) if predicted_cpls else None,
+        "mean_actual_cpl": round(float(np.mean(actual_cpls)), 1) if actual_cpls else None,
+        "opening_repro_first12": round(first12_match / max(first12_total, 1), 4),
         "mate_in_one_positions": mate_positions,
         "mate_in_one_converted": mate_hits,
         "mate_in_one_converted_by_humans": human_mate_hits,

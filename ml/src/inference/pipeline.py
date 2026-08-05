@@ -57,6 +57,10 @@ class PredictionPipeline:
         # internal Lichess-scale rating; this keeps the display honest for
         # Chess.com players after a cache rehydrate).
         self.player_display_ratings: dict[str, float] = {}
+        # PRD §4.1 #13 (Color-Specific Mode): player_key → {"w": vec, "b": vec}.
+        # Auto-selected by side-to-move at predict time; combined stats are
+        # the fallback when a color has too few games.
+        self.player_stats_by_color: dict[str, dict[str, np.ndarray]] = {}
         # PRD §5.3: position-keyed personal explorer per player. Replaces
         # the Lichess /player explorer call for Chess.com opponents and
         # serves as a fast local fallback for Lichess opponents.
@@ -176,6 +180,16 @@ class PredictionPipeline:
         self.player_stats[player_key] = stats
         logger.info("Stored player stats for %s (%d features)", player_key, len(stats))
 
+    def set_player_stats_by_color(
+        self, player_key: str, vectors: dict[str, np.ndarray]
+    ) -> None:
+        """Register per-color stats vectors (PRD §4.1 #13)."""
+        self.player_stats_by_color[player_key] = vectors
+        logger.info(
+            "Stored per-color stats for %s (colors: %s)",
+            player_key, ",".join(sorted(vectors)),
+        )
+
     def set_player_time_control(self, player_key: str, time_control: str | None) -> None:
         """Store the time control used for this player's profile."""
         tc_id = self.TIME_CONTROL_IDS.get(time_control, 0) if time_control else 0
@@ -257,10 +271,18 @@ class PredictionPipeline:
                 emb, pid = personalized
                 self.set_personalization(player_key, emb, pid)
 
-        # Retrieve stored player stats if not explicitly provided
-        if player_stats is None and player_key and player_key in self.player_stats:
-            player_stats = self.player_stats[player_key]
-            logger.debug("Using stored stats for %s", player_key)
+        # Retrieve stored player stats if not explicitly provided.
+        # PRD §4.1 #13: prefer the color-specific vector for the side the
+        # clone is playing (side to move at predict time) when available.
+        if player_stats is None and player_key:
+            color = "w" if board.turn == chess.WHITE else "b"
+            by_color = self.player_stats_by_color.get(player_key)
+            if by_color and color in by_color:
+                player_stats = by_color[color]
+                logger.debug("Using %s-color stats for %s", color, player_key)
+            elif player_key in self.player_stats:
+                player_stats = self.player_stats[player_key]
+                logger.debug("Using stored stats for %s", player_key)
 
         # Derive style from player stats when no explicit overrides are set.
         # This makes the prediction reflect the player's actual playing style

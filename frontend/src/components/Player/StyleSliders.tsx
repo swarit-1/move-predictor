@@ -84,6 +84,12 @@ const SLIDERS: SliderDef[] = [
     description: "Fight harder when the position is worse",
     group: "advanced",
   },
+  {
+    key: "pawn_aggression",
+    label: "Pawn Aggression",
+    description: "Flank pawn storms and space-grabbing pushes",
+    group: "advanced",
+  },
 ];
 
 export function StyleSliders() {

@@ -227,6 +227,16 @@ async def _do_build_profile(
     # Compute stats from games
     stats = compute_stats_from_pgns(pgn_texts, request.username)
 
+    # PRD §4.1 #13 (Color-Specific Mode): also compute per-color stats when
+    # there's enough signal per color. People really do play differently as
+    # White vs Black; the pipeline auto-selects by side-to-move at predict
+    # time. Fewer than 10 games with a color → fall back to combined.
+    stats_by_color: dict[str, "np.ndarray"] = {}
+    for color in ("white", "black"):
+        color_stats = compute_stats_from_pgns(pgn_texts, request.username, color)
+        if color_stats.num_games >= 10:
+            stats_by_color[color[0]] = color_stats  # keyed "w"/"b"
+
     # Override PGN-derived rating with authoritative API rating
     if authoritative_rating is not None:
         stats.rating = authoritative_rating
@@ -292,6 +302,16 @@ async def _do_build_profile(
     # The platform-facing number is kept separately for display.
     stats_vector[0] = internal_rating / 3000.0
     prediction_pipeline.player_display_ratings[player_key] = float(stats.rating)
+
+    # Per-color vectors (same internal-rating normalization).
+    color_vectors: dict[str, "np.ndarray"] = {}
+    for c, cstats in stats_by_color.items():
+        v = cstats.to_vector()
+        v[0] = internal_rating / 3000.0
+        color_vectors[c] = v
+    if color_vectors:
+        prediction_pipeline.set_player_stats_by_color(player_key, color_vectors)
+
     prediction_pipeline.set_opening_book(player_key, book)
     prediction_pipeline.set_player_stats(player_key, stats_vector)
     prediction_pipeline.set_player_time_control(player_key, request.time_control)
@@ -308,6 +328,7 @@ async def _do_build_profile(
         rating=stats.rating,
         num_games=stats.num_games,
         personal_explorer=personal_explorer,
+        stats_by_color=color_vectors or None,
     )
 
     logger.info(
@@ -378,6 +399,9 @@ def _derive_baseline_style(stats) -> dict[str, float]:
     # a crude floor: drifty players have low tenacity.
     defensive_tenacity = clamp(80.0 - stats.eval_volatility * 60.0)
 
+    # PRD §4.1 #11: storm-push rate ~0.08 is typical → maps to 50.
+    pawn_aggression = clamp(stats.pawn_aggression * 600.0)
+
     return {
         "aggression": clamp(aggression),
         "risk_taking": clamp(risk_taking),
@@ -389,6 +413,7 @@ def _derive_baseline_style(stats) -> dict[str, float]:
         "repertoire_width": clamp(repertoire_width),
         "endgame_strength": clamp(endgame_strength),
         "defensive_tenacity": clamp(defensive_tenacity),
+        "pawn_aggression": pawn_aggression,
     }
 
 

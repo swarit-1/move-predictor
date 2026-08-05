@@ -82,6 +82,13 @@ class PlayerStats:
     """Fraction of captures that are *initiating* trades (capturing a
     piece that wasn't the immediate recapture). High = aggressive trader."""
 
+    # ── Not in to_vector() — the 33-dim vector is frozen for checkpoint
+    # compatibility. Drives slider baselines + sampler biases only. ──
+    pawn_aggression: float = 0.0
+    """PRD §4.1 #11: fraction of middlegame moves that are flank pawn
+    pushes (a/b/g/h files) or pawn advances past the 4th rank — the
+    signature of a pawn-storm player."""
+
     def to_vector(self) -> np.ndarray:
         """Convert to a numpy vector for model input.
 
@@ -223,16 +230,34 @@ async def annotate_pgns_with_stockfish(
     return new_pgns
 
 
-def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerStats:
+def compute_stats_from_pgns(
+    pgn_texts: list[str],
+    player_name: str,
+    color_filter: str | None = None,
+) -> PlayerStats:
     """Compute player statistics from a collection of PGN games.
 
     Args:
         pgn_texts: List of PGN strings.
         player_name: The player's name (to determine which side they played).
+        color_filter: PRD §4.1 #13 (Color-Specific Mode) — "white" or
+            "black" restricts the computation to games the player played
+            with that color; None uses every game.
 
     Returns:
         PlayerStats with computed values.
     """
+    if color_filter in ("white", "black"):
+        want_white = color_filter == "white"
+        filtered = []
+        for text in pgn_texts:
+            header_zone = text.split("\n\n", 1)[0]
+            m = re.search(r'\[White "([^"]*)"\]', header_zone)
+            is_white = bool(m) and m.group(1).lower() == player_name.lower()
+            if is_white == want_white:
+                filtered.append(text)
+        pgn_texts = filtered
+
     stats = PlayerStats()
     stats.num_games = len(pgn_texts)
 
@@ -260,6 +285,7 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
     blunder_count = 0  # moves with CPL > 100
     # ── PRD §4.2 new accumulators ────────────────────────────────────
     total_quiet_moves = 0  # neither capture nor check nor castle
+    total_storm_pushes = 0  # PRD §4.1 #11: flank/storm pawn pushes in middlegame
     total_initiating_captures = 0  # captures that aren't recaptures
     games_with_sacrifice = 0  # games where ≥1 eval drop ≥150 cp occurred
     games_sacrifice_rewarded = 0  # of those, the player won or drew
@@ -376,6 +402,17 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
                 # PRD §4.2: quiet move = not capture, not check, not castle.
                 if not is_capture and not gives_check and not is_castle_move:
                     total_quiet_moves += 1
+
+                # PRD §4.1 #11 (Pawn Aggression): flank pawn pushes (a/b/g/h
+                # files) or any pawn advancing past its 4th rank outside the
+                # opening — the signature of a storm player.
+                _pc = board.piece_at(move.from_square)
+                if _pc is not None and _pc.piece_type == chess.PAWN and move_count >= 10:
+                    _file = chess.square_file(move.to_square)
+                    _rank = chess.square_rank(move.to_square)
+                    _adv_rank = _rank if _pc.color == chess.WHITE else 7 - _rank
+                    if _file in (0, 1, 6, 7) or _adv_rank >= 4:
+                        total_storm_pushes += 1
 
                 # PRD §4.2: king-attack intensity. Count own attackers on
                 # the 9-square enemy king zone before and after the move,
@@ -589,6 +626,7 @@ def compute_stats_from_pgns(pgn_texts: list[str], player_name: str) -> PlayerSta
     # ── PRD §4.2 derived stats ────────────────────────────────────────
     if total_moves > 0:
         stats.quiet_move_ratio = total_quiet_moves / total_moves
+        stats.pawn_aggression = total_storm_pushes / total_moves
         if total_captures > 0:
             stats.capture_initiation_rate = (
                 total_initiating_captures / total_captures

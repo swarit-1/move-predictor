@@ -88,6 +88,7 @@ async def save_profile(
     rating: float,
     num_games: int,
     personal_explorer: PersonalExplorer | None = None,
+    stats_by_color: dict[str, np.ndarray] | None = None,
 ) -> None:
     """Write a built profile to Redis. Best-effort: failures are logged and swallowed."""
     client = await _get_client()
@@ -102,6 +103,11 @@ async def save_profile(
     }
     if personal_explorer is not None:
         payload["personal_explorer"] = personal_explorer.to_dict()
+    # PRD §4.1 #13: per-color stats vectors ("w"/"b" keys)
+    if stats_by_color:
+        payload["stats_by_color"] = {
+            c: v.tolist() for c, v in stats_by_color.items()
+        }
     try:
         await client.setex(
             _profile_key(player_key),
@@ -146,6 +152,12 @@ async def hydrate_profile_into_pipeline(player_key: str, pipeline) -> bool:
         tc = cached.get("time_control")
         pipeline.set_opening_book(player_key, book)
         pipeline.set_player_stats(player_key, stats)
+        by_color = cached.get("stats_by_color")
+        if by_color:
+            pipeline.set_player_stats_by_color(
+                player_key,
+                {c: np.array(v, dtype=np.float32) for c, v in by_color.items()},
+            )
         pipeline.set_player_time_control(player_key, tc)
         # PRD §5.3: rehydrate the personal explorer if the cached
         # profile carries one (newer cache writes do; legacy entries
